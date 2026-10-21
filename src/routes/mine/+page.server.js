@@ -57,7 +57,7 @@ function myHero(db) {
   const recent = db.prepare(`SELECT ${COVER_COLS} FROM user_entry ue JOIN anime a ON a.id = ue.anime_id
     WHERE coalesce(a.cover_dead, 0) = 0 AND coalesce(a.picture, a.thumbnail) IS NOT NULL
     ORDER BY ue.updated_at DESC LIMIT 5`).all();
-  return { days: w.secs / 86400, avg: avg == null ? null : Math.round(avg * 100) / 100, recent };
+  return { days: w.secs / 86400, avg: avg == null ? null : Math.round(avg * 10) / 10, recent };
 }
 
 /**

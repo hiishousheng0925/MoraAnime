@@ -1,8 +1,9 @@
 import { seasonGrid, seasonYears, currentSeason, yearWindow, seasonCounts, shiftSeason } from '$lib/server/queries.js';
 import { num, hideNsfw, pickTypes, pickPer } from '$lib/server/loaderUtil.js';
 import { yearCeil, ALL_TYPES, SEASON_SORT_OPTS, SEASON_DEFAULT_SORT } from '$lib/constants.js';
+import { pickWatches } from '$lib/urlBuild.js';
 
-export function load({ url }) {
+export function load({ url, locals }) {
   const s = url.searchParams;
   const years = seasonYears().filter((y) => y.year <= yearCeil());
   const cur = currentSeason();
@@ -30,7 +31,9 @@ export function load({ url }) {
    * 单季每页默认 24 = 一排 8 张 × 3 排，和目录/番单一致。
    */
   const nsfw = hideNsfw();
-  const full = seasonGrid(year, { types, minSources: min, sort, hideNsfw: nsfw });
+  // 「我的」多选：和目录页同一套参数与 SQL 条件；访客没有番单，不筛
+  const watches = locals.user ? pickWatches(s.getAll('watch')) : null;
+  const full = seasonGrid(year, { types, minSources: min, sort, hideNsfw: nsfw, watches });
   const shown = season ? [season] : ORDER;
   const counts = Object.fromEntries(ORDER.map((k) => [k, full[k].length]));
   const total = shown.reduce((n, k) => n + full[k].length, 0);
@@ -62,7 +65,7 @@ export function load({ url }) {
     ? [shiftSeason(year, season, -1), shiftSeason(year, season, 1)]
     : [{ year: year - 1, season: null }, { year: year + 1, season: null }];
   const cnt = seasonCounts(Math.min(...strip.map((x) => x.year)), Math.max(...strip.map((x) => x.year)),
-                           { types, minSources: min, hideNsfw: nsfw });
+                           { types, minSources: min, hideNsfw: nsfw, watches });
   const hero = {
     strip: strip.map((x) => ({ ...x, c: cnt[`${x.year}-${x.season}`] ?? 0 })),
     prev: inWin(step[0]) ? step[0] : null,
@@ -74,7 +77,7 @@ export function load({ url }) {
 
   return {
     hero,
-    year, years, cur, min, season, types, typesAreDefault, sort,
+    year, years, cur, min, season, types, typesAreDefault, sort, watches,
     seasonIsAll: seasonRaw === 'all',
     grid, counts, total, page, pages, per: paged ? per : null, perIsDefault
   };

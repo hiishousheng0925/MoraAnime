@@ -8,7 +8,8 @@
   import CoverBackdrop from '$lib/ui/CoverBackdrop.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
   import { EXIT } from '$lib/ui/btn.js';
-  import { SEASON_CN, SEASON_MONTHS, TYPE_OPTS, TYPE_CN, SEASON_SORT_OPTS, SEASON_DEFAULT_SORT } from '$lib/constants.js';
+  import { SEASON_CN, SEASON_MONTHS, TYPE_OPTS, TYPE_CN, SEASON_SORT_OPTS, SEASON_DEFAULT_SORT, MY_OPTS } from '$lib/constants.js';
+  import { watchSummary } from '$lib/urlBuild.js';
   import { dispTitle } from '$lib/format.js';
   import { makeHref } from '$lib/urlState.js';
   import { edgeFade } from '$lib/edgeFade.js';
@@ -34,7 +35,8 @@
   // 与目录页同一套：胶囊上直接显示当前值
   const sum = $derived({
     type: data.typesAreDefault ? null : data.types.map((t) => TYPE_CN[t] ?? t).join('·'),
-    min: MIN_OPTS.find(([v]) => v === data.min)?.[1]
+    min: MIN_OPTS.find(([v]) => v === data.min)?.[1],
+    mine: watchSummary(data.watches)
   });
 
   /**
@@ -158,6 +160,13 @@
       <p class="mt-2 text-[11px] text-ink-400">按收录站点数过滤冷门条目</p>
     </FilterPill>
 
+    <!-- 和目录页同一套「我的」多选；访客没有番单，不显示 -->
+    {#if data.user}
+      <FilterPill label="我的" summary={sum.mine} count={(data.watches ?? []).length} w="20rem">
+        <MultiChip param="watch" opts={MY_OPTS} selected={data.watches} isDefault={!data.watches} href={to} />
+      </FilterPill>
+    {/if}
+
     <!-- 和目录/番单同一个组件。少了「最新/最早」：一个季度块里年份季度都一样，那两项是空操作 -->
     <SortPill opts={SEASON_SORT_OPTS} sort={data.sort} {to} defaultSort={SEASON_DEFAULT_SORT} align="left" />
 
@@ -167,7 +176,7 @@
               dflt={data.year === data.cur.year && !data.seasonIsAll && data.season === data.cur.season}
               seasonAllValue="all" seasonAllOn={data.seasonIsAll} />
 
-    {#if data.year !== data.cur.year || data.season !== data.cur.season || data.min !== 4 || !data.typesAreDefault}
+    {#if data.year !== data.cur.year || data.season !== data.cur.season || data.min !== 4 || !data.typesAreDefault || data.watches}
       <ResetButton href="/seasons" />
     {/if}
   </div>
@@ -181,6 +190,7 @@
         <EmptyState title="{data.year} 年{SEASON_CN[data.season]}季没有符合条件的番剧">
           {#if data.min > 1}<a href={to({ min: 1 })} class={EXIT}>门槛改为全部</a>{/if}
           {#if !data.typesAreDefault}<a href={to({ type: null })} class={EXIT}>全部类型</a>{/if}
+          {#if data.watches}<a href={to({ watch: null })} class={EXIT}>「我的」改为全部</a>{/if}
         </EmptyState>
       </div>
     {/if}

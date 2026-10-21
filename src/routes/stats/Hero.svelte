@@ -22,7 +22,7 @@
   });
   const kpis = $derived([
     { stat: 'total', v: fmtNum(data.total), unit: null, label: '番单总数' },
-    { stat: 'avg', v: data.avgScore ?? '—', unit: data.avgScore == null ? null : '/10', label: '我的平均分' },
+    { stat: 'avg', v: data.avgScore == null ? '—' : data.avgScore.toFixed(1), unit: data.avgScore == null ? null : '/10', label: '我的平均分' },
     data.topGenre && { stat: 'genre', v: data.topGenre.name, unit: null, label: `最多的题材 · ${data.topGenre.c} 部` },
     data.peakYear && { stat: 'year', v: data.peakYear.year, unit: null, label: `最多的年份 · ${data.peakYear.c} 部` }
   ].filter(Boolean));

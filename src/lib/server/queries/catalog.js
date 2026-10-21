@@ -10,6 +10,20 @@ import { toFtsQuery } from '../text.js';
 import { normTitle, ensureNorm } from '../normTitle.js';
 import { SORTS, orderBy } from './sorts.js';
 
+/**
+ * 「我的」多选条件（目录 / 季度浏览共用）。要求查询里有 `LEFT JOIN user_entry ue`。
+ * none = 番单里没有这部（快速标记判成没看过的不写番单，所以也在内）；其余是 ue.status。
+ * 选项之间是 OR。空 / null → null（不筛）。
+ */
+export function watchCond(watches) {
+  if (!watches?.length) return null;
+  const st = watches.filter((v) => v !== 'none');
+  const parts = [];
+  if (watches.includes('none')) parts.push('ue.anime_id IS NULL');
+  if (st.length) parts.push(`ue.status IN (${st.map(() => '?').join(',')})`);
+  return { sql: `(${parts.join(' OR ')})`, params: st };
+}
+
 function buildWhere(f) {
   const w = ['a.is_stub = 0'];
   const p = [];
@@ -59,6 +73,8 @@ function buildWhere(f) {
     // 「全部」tab 却是 337 —— 叫「全部」就该是全部（2026-10-18）
     w.push('ue.anime_id IS NOT NULL');
   } else if (f.watch) { w.push('ue.status = ?'); p.push(f.watch); }
+  const wc = watchCond(f.watches);
+  if (wc) { w.push(wc.sql); p.push(...wc.params); }
   // 我的评分：'none' 只看还没打分的、'has' 只看打过分的。
   // 必须要求在番单里 —— 否则「未评分」会把全库四万条没记录的番全算进来。
   if (f.myScore === 'none') w.push('ue.anime_id IS NOT NULL AND ue.my_score IS NULL');
@@ -123,10 +139,24 @@ function buildWhere(f) {
 const SEARCH_OFF = {
   types: null, requireYear: false, yearMin: null, yearMax: null, season: null,
   statuses: null, status: null, excludeUpcoming: false, isShort: null, weekday: null,
-  watch: null, myScore: null, genres: null, genresAny: null, genresNot: null,
+  watch: null, watches: null, myScore: null, genres: null, genresAny: null, genresNot: null,
   tag: null, tagNot: null, scoreMin: null, votesMin: null, rankedOnly: false,
   studio: null, epMax: null
 };
+
+/**
+ * 年份胶囊上的部数，和列表走同一套筛选条件（年份本身除外）。
+ * 排行榜原来用全库年份计数（facets().years），只进榜的番才上榜 —— 2027 年胶囊写 128、点进去 1 部（主人 2026-10-21 报）。
+ * byBangumi：按 Bangumi 条目去重计数，和排行榜的 dedupByBangumi 一致（同一条目的本篇 + 番外只算一张卡）
+ */
+export function yearCounts(f = {}, { byBangumi = false } = {}) {
+  const { where, params } = buildWhere({ ...f, yearMin: null, yearMax: null });
+  const usesEntry = /\bue\./.test(where);
+  return getDb().prepare(`
+    SELECT a.year, ${byBangumi ? 'count(DISTINCT coalesce(a.bgm_id, -a.id))' : 'count(*)'} c FROM anime a
+    ${usesEntry ? 'LEFT JOIN user_entry ue ON ue.anime_id = a.id' : ''}
+    WHERE ${where} AND a.year IS NOT NULL GROUP BY a.year ORDER BY a.year DESC`).all(...params);
+}
 
 export function listAnime(f = {}, { limit = 60, offset = 0, sort = 'popular', sort2 = 'popular' } = {}) {
   const db = getDb();
@@ -313,16 +343,18 @@ export const SCHED_COLS = `a.id, a.title, a.title_ja, a.title_cn, a.type, a.year
   a.status, coalesce(a.status_eff, a.status) AS status_eff, a.is_short, a.thumbnail, a.picture, a.cover_dead, a.bgm_score, a.bgm_votes,
   a.bgm_weekday, a.bgm_collection, a.source_count`;
 /** 季度浏览：某一年四个季度各有哪些番 */
-export function seasonGrid(year, { types = ['TV'], minSources = 4, hideNsfw = false, sort = 'popular' } = {}) {
+export function seasonGrid(year, { types = ['TV'], minSources = 4, hideNsfw = false, sort = 'popular', watches = null } = {}) {
   const db = getDb();
   const ph = types.map(() => '?').join(',');
+  const wc = watchCond(watches);
   const rows = db.prepare(`
     SELECT ${SCHED_COLS}, ue.status AS my_status, ue.current_episode, ue.my_score
     FROM anime a LEFT JOIN user_entry ue ON ue.anime_id = a.id
     WHERE a.is_stub = 0 AND a.is_jp = 1 AND a.year = ? AND a.season IS NOT NULL
       AND a.type IN (${ph}) AND a.source_count >= ?
       ${hideNsfw ? 'AND a.is_nsfw = 0' : ''}
-    ORDER BY ${SORTS[sort] || SORTS.popular}, a.source_count DESC`).all(year, ...types, minSources);
+      ${wc ? `AND ${wc.sql}` : ''}
+    ORDER BY ${SORTS[sort] || SORTS.popular}, a.source_count DESC`).all(year, ...types, minSources, ...(wc?.params ?? []));
   const out = { WINTER: [], SPRING: [], SUMMER: [], FALL: [] };
   for (const r of rows) out[r.season]?.push(r);
   return out;

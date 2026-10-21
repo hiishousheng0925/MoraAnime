@@ -98,7 +98,7 @@ const want = {
   hours: Math.round(watchedRows.reduce((n, r) => n + epsOf(r) * (meta.get(r.anime_id).duration_sec ?? 1440), 0) / 3600),
   avgScore: (() => {
     const v = watchedRows.filter((r) => r.my_score != null).map((r) => r.my_score);
-    return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100) / 100 : null;
+    return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
   })(),
   byStatus: rows.reduce((m, r) => ({ ...m, [r.status]: (m[r.status] ?? 0) + 1 }), {}),
   byYear: (() => {
@@ -247,7 +247,7 @@ console.log('\n━━━ 5. 页面渲染出的数字和后端一致 ━━━');
   eq(num('total'), fmt(got.total), '页面「番单总数」');
   eq(num('episodes'), fmt(got.episodes), '页面「看过集数」');
   eq(num('hours'), fmt(got.hours), '页面「约合小时」');
-  eq(num('avg'), String(got.avgScore), '页面「我的平均分」');
+  eq(num('avg'), got.avgScore.toFixed(1), '页面「我的平均分」');
   eq(num('genre'), got.topGenre.name, '页面「最多的题材」');
   eq(num('year'), String(got.peakYear.year), '页面「最多的年份」');
   eq(num('streak'), String(got.longestStreak), '页面「最长连续」');

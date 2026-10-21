@@ -2,6 +2,7 @@
  * 纯 URL 拼装 —— 不依赖 SvelteKit runtime，所以可以在 Node 里直接单元测试。
  * 需要导航的 makeSetter 在 urlState.js（它要 import $app/navigation）。
  */
+import { MY_OPTS } from './constants.js';
 
 /**
  * 生成 URL，不导航 —— 给 <a href> 用。
@@ -54,3 +55,17 @@ export function genreSummary(f) {
   const t = parts.join(' ');
   return t ? (t.length > 18 ? t.slice(0, 17) + '…' : t) : null;
 }
+
+const MY_LABEL = Object.fromEntries(MY_OPTS);
+/**
+ * 「我的」多选：`watch=none&watch=plan`（和 status / type 同一种写法）。
+ * 旧链接的单值 `watch=plan` 自然兼容。只认 MY_OPTS 里的键、去重；
+ * 没有有效值 → null（= 不筛）。
+ */
+export function pickWatches(values) {
+  const ok = [...new Set((values ?? []).filter((v) => Object.hasOwn(MY_LABEL, v)))];
+  return ok.length ? ok : null;
+}
+
+/** 「我的」胶囊上的摘要：`未标记·想看`；不筛时 null */
+export const watchSummary = (watches) => (watches?.length ? watches.map((v) => MY_LABEL[v]).join('·') : null);

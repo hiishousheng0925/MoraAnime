@@ -100,6 +100,11 @@ export const DEFAULT_TYPES = ['TV', 'MOVIE', 'OVA'];
 export const TYPE_OPTS   = ALL_TYPES.map((v) => [v, TYPE_CN[v]]);
 
 export const WATCH_OPTS  = Object.entries(WATCH_STATUS);
+/**
+ * 「我的」筛选（目录 / 季度浏览）的多选项。none = 番单里没有这部
+ * （快速标记判成没看过的也算 —— 那种不写番单记录）。
+ */
+export const MY_OPTS = [['none', '未标记'], ...WATCH_OPTS];
 /** 番单的 tab：「全部」只含想看/在看/看完，搁置与弃番单列 */
 export const MINE_TABS = [
   ['active', '全部'], ['plan', '想看'], ['watching', '在看'],

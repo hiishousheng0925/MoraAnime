@@ -4,8 +4,9 @@ import { num, pickQ, hideNsfw, pickTypes, pickStatus, pickGenres, yearFacets, pi
 import { yearWindow } from '$lib/server/queries.js';
 import { normStudio } from '$lib/server/text.js';
 import { DEFAULT_SORT, DEFAULT_TYPES, pickSort2 } from '$lib/constants.js';
+import { pickWatches } from '$lib/urlBuild.js';
 
-export function load({ url }) {
+export function load({ url, locals }) {
   const pd = applyCatalogDefault(url);   // 命中「我的默认」时会直接重定向
   const s = url.searchParams;
   const fromRaw = num(s.get('from'));
@@ -36,7 +37,8 @@ export function load({ url }) {
     scoreMin: num(s.get('smin')),
     myScore: ['none', 'has'].includes(s.get('ms')) ? s.get('ms') : null,
     votesMin: num(s.get('vmin')),
-    watch: s.get('watch') || null,
+    // 「我的」多选（watch=none&watch=plan，旧的单值链接照样认）；访客没有番单，不筛
+    watches: locals.user ? pickWatches(s.getAll('watch')) : null,
     // 过一遍 normStudio：#109 改了归一规则，旧链接里的 studio=8-bit 也要认得
     studio: s.get('studio') ? normStudio(s.get('studio')) : null,
     // 搜索时可以越过显示窗口（yw=0）：窗口设成 1995 起时，龙猫、AKIRA、高达 0079 原来完全搜不到

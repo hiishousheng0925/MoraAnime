@@ -13,6 +13,7 @@
   import BrandMark from '$lib/ui/BrandMark.svelte';
   import TabBar from '$lib/ui/TabBar.svelte';
   import QuickSearch from '$lib/ui/QuickSearch.svelte';
+  import UpdateChip from '$lib/ui/UpdateChip.svelte';
   import { requireLogin, logout } from '$lib/auth.svelte.js';
   import { replaceState } from '$app/navigation';
   import { toast } from '$lib/toast.svelte.js';
@@ -172,6 +173,7 @@
   <div class="ml-auto flex shrink-0 items-center gap-1">
     <!-- 全站搜索（⌘K / Ctrl K / 「/」）：桌面是「放大镜 + 搜索 + 键帽」，手机只剩放大镜；面板见 QuickSearch.svelte -->
     <QuickSearch />
+    {#if data.desktop}<UpdateChip />{/if}
     {#if user && data.stats.watching}
       <a href="/mine?status=watching" class="chip flex max-sm:hidden">
         <i class="live h-1.5 w-1.5 rounded-full bg-live" aria-hidden="true"></i>在看<b>{data.stats.watching}</b>
@@ -265,22 +267,22 @@
         </div>
       {/if}
       <div class="row flex items-center gap-2">
-        {#if user}
-          <a href={data.desktop ? '/settings' : '/settings#account'} data-sveltekit-reload title={data.desktop ? '设置' : '账号设置'}
+        {#if data.desktop}
+          <!-- 桌面客户端单机免登录：内置账号（me）只是个技术细节，不显示头像 / 用户名（主人 2026-10-21） -->
+          <span class="flex-1"></span>
+        {:else if user}
+          <a href="/settings#account" data-sveltekit-reload title="账号设置"
              class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 hover:bg-ink-800">
             <span class="ava grid h-8 w-8 shrink-0 place-items-center rounded-full text-[12.5px] font-bold uppercase text-white">
               {user.username.slice(0, 1)}
             </span>
             <span class="lbl truncate text-[13px] text-ink-200">{user.username}</span>
           </a>
-          <!-- 桌面客户端单机免登录：不给登出（登出后只会弹登录框） -->
-          {#if !data.desktop}
           <button type="button" onclick={signOut} title="登出" aria-label="登出"
                   class="lbl grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-900 text-ink-200
                          transition hover:border-ink-400 active:scale-95">
             <SignOut size={16} />
           </button>
-          {/if}
         {:else}
           <button type="button" onclick={() => requireLogin()} title="登录"
                   class="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent text-[13px] font-medium

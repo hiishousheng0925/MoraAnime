@@ -1,6 +1,6 @@
-import { listAnime } from '$lib/server/queries.js';
-import { num, hideNsfw, yearFacets, pickPer } from '$lib/server/loaderUtil.js';
-import { ALL_TYPES } from '$lib/constants.js';
+import { listAnime, yearCounts } from '$lib/server/queries.js';
+import { num, hideNsfw, pickPer } from '$lib/server/loaderUtil.js';
+import { ALL_TYPES, yearCeil } from '$lib/constants.js';
 
 // 榜单只到前 300 名。每页默认 30（三列 × 每列 10），可选 30/50/100
 const MAX_RANK = 300;
@@ -59,6 +59,10 @@ export function load({ url }) {
     pages,
     total: capped, allTotal: total,
     type, decade, year, season,
-    years: yearFacets()
+    /**
+     * 年份胶囊：只数这张榜上会出现的（进榜 + 当前类型 / 季度 + 按 Bangumi 条目去重），
+     * 并且只到明年 —— 原来用全库计数，2027 写 128 部点进去只有 1 部，还列出 2028 / 2029（主人 2026-10-21）
+     */
+    years: yearCounts({ ...f, yearMin: null, yearMax: null }, { byBangumi: true }).filter((y) => y.year <= yearCeil())
   };
 }

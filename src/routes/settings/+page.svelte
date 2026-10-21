@@ -9,6 +9,7 @@
   import RangeSlider from '$lib/ui/RangeSlider.svelte';
   import WatchSites from '$lib/ui/WatchSites.svelte';
   import BackupCard from '$lib/ui/BackupCard.svelte';
+  import FolderPicker from '$lib/ui/FolderPicker.svelte';
   import AccountCard from '$lib/ui/AccountCard.svelte';
   import SignupAllow from '$lib/ui/SignupAllow.svelte';
   import { requireLogin } from '$lib/auth.svelte.js';
@@ -56,6 +57,16 @@
   /** 截图保存位置（观看页右上角的相机）：服务端写盘，所以是这台电脑上的绝对路径 */
   let shotDir = $state('');
   $effect(() => { shotDir = data.shotDir; });
+  /**
+   * 「浏览…」：桌面客户端（preload 给了 window.mora.pickFolder）弹系统的文件夹选择框；
+   * 网站的路径在服务器上，浏览器自己的选择框选不了 —— 用站内的 FolderPicker（服务端列目录）。两边按钮一样（主人 2026-10-21）
+   */
+  let pickerOpen = $state(false);
+  const pickedDir = (p) => { pickerOpen = false; if (p) { shotDir = p; saveShotDir(p); } };
+  async function pickShotDir() {
+    if (window.mora?.pickFolder) pickedDir(await window.mora.pickFolder(shotDir || data.shotDefault));
+    else pickerOpen = true;
+  }
   async function saveShotDir(v) {
     const r = await api('/api/settings', { key: 'screenshot_dir', value: v });
     if (r) toast.ok(`截图保存到 ${r.value}`);
@@ -124,7 +135,7 @@
         <div class="px-3 pb-1.5 pt-4 text-[11px] font-medium tracking-[0.08em] text-ink-400 first:pt-0">{g}</div>
         {#each xs as [id, label] (id)}
           <a href="#{id}" onclick={() => (curSec = id)} class:is-current={curSec === id} aria-current={curSec === id ? 'true' : undefined}
-             class="block rounded-lg px-3 py-1.5 text-[13px] transition {curSec === id ? '' : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'}">{label}</a>
+             class="block rounded-lg py-1.5 pl-6 pr-3 text-[13px] transition {curSec === id ? '' : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'}">{label}</a>
         {/each}
       {/each}
     </nav>
@@ -254,12 +265,13 @@
         <div class="text-[13px] text-ink-200">保存位置</div>
         <form class="mt-2 flex flex-wrap gap-2" onsubmit={(e) => { e.preventDefault(); saveShotDir(shotDir); }}>
           <input bind:value={shotDir} spellcheck="false" aria-label="截图保存位置" class="{INPUT} font-mono max-sm:basis-full" />
+          <button type="button" onclick={pickShotDir} disabled={busy} class={SECONDARY}>浏览…</button>
           <button disabled={busy || !shotDir.trim() || shotDir === data.shotDir} class={PRIMARY}>保存</button>
           {#if data.shotDir !== data.shotDefault}
             <button type="button" onclick={() => saveShotDir('')} disabled={busy} class={SECONDARY}>恢复默认</button>
           {/if}
         </form>
-        <div class="mt-1.5 text-[12px] text-ink-400">缺省 {data.shotDefault}</div>
+        <FolderPicker open={pickerOpen} start={shotDir || data.shotDefault} onpick={pickedDir} oncancel={() => (pickerOpen = false)} />
       </div>
     </Group>
     {/if}

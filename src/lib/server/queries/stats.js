@@ -62,8 +62,11 @@ export function stats() {
     SELECT cast(ue.my_score AS INTEGER) s, count(*) c FROM user_entry ue
     WHERE ${WATCHED} AND ue.my_score IS NOT NULL GROUP BY s ORDER BY s`).all();
 
-  const avgScore = one(`SELECT round(avg(ue.my_score),2) v FROM user_entry ue
-                        WHERE ${WATCHED} AND ue.my_score IS NOT NULL`).v;
+  // 平均分统一一位小数（评分本身就是一位小数；主人 2026-10-21：「7.24」改成「7.2」）
+  // 在 JS 里四舍五入，不用 SQL 的 round(x,1)：6.85 那种值两边舍入方向不同，统计页和番单页头会差 0.1
+  const avgRaw = one(`SELECT avg(ue.my_score) v FROM user_entry ue
+                      WHERE ${WATCHED} AND ue.my_score IS NOT NULL`).v;
+  const avgScore = avgRaw == null ? null : Math.round(avgRaw * 10) / 10;
 
   // 题材：一个中文题材对应多个 AOD 标签，必须按番剧去重计数。
   // 早先用「各标签计数取 max」，实测 51 个题材有 23 个偏低（青春少 32%、悬疑少 29%）

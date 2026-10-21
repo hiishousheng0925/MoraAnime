@@ -9,9 +9,9 @@
   import YearPill from '$lib/ui/YearPill.svelte';
   import SaveFilter from '$lib/ui/SaveFilter.svelte';
   import { GENRE_NAMES } from '$lib/genres.js';
-  import { TYPE_OPTS, TYPE_CN, STATUS_CN, SEASON_CN, WEEKDAY_OPTS, WATCH_OPTS, WATCH_STATUS, SORT_OPTS, DEFAULT_SORT, DEFAULT_SORT2, STATUS_OPTS_ALL } from '$lib/constants.js';
+  import { TYPE_OPTS, TYPE_CN, STATUS_CN, SEASON_CN, WEEKDAY_OPTS, MY_OPTS, SORT_OPTS, DEFAULT_SORT, DEFAULT_SORT2, STATUS_OPTS_ALL } from '$lib/constants.js';
   import { makeSetter, makeHref, toggleIn } from '$lib/urlState.js';
-  import { moveGenre as moveIn, genreSummary } from '$lib/urlBuild.js';
+  import { moveGenre as moveIn, genreSummary, watchSummary } from '$lib/urlBuild.js';
   import { page as pg } from '$app/state';
   import Page from '$lib/ui/Page.svelte';
   import ResetButton from '$lib/ui/ResetButton.svelte';
@@ -48,9 +48,10 @@
     (f.yearIsDefault ? 0 : 1) + (f.yearMax ? 1 : 0) + (f.season ? 1 : 0) +
     (f.status ? 1 : 0) + (f.weekday ? 1 : 0) + (f.isShort !== null ? 1 : 0) +
     (f.epMax ? 1 : 0) + (f.scoreMin ? 1 : 0) + (f.votesMin ? 1 : 0) +
-    (f.watch ? 1 : 0) + (f.studio ? 1 : 0)
+    (f.watches ? 1 : 0) + (f.studio ? 1 : 0)
   );
   const WD = $derived(Object.fromEntries(WEEKDAY_OPTS));
+  const MY_LABEL = Object.fromEntries(MY_OPTS);
 
   /** 每枚胶囊上直接显示当前值 —— 不用展开就知道筛了什么 */
   const sum = $derived({
@@ -69,7 +70,7 @@
           f.myScore === 'none' ? '未评分' : f.myScore === 'has' ? '已评分' : null]
       .filter(Boolean).join('·') || null,
     studio: f.studio ? (data.facets.studios.find((x) => x.studio === f.studio)?.label ?? f.studio) : null,
-    mine: f.watch ? (f.watch === 'none' ? '未标记' : WATCH_STATUS[f.watch]) : null
+    mine: watchSummary(f.watches)
   });
 
   /** 已生效筛选，逐项可删 */
@@ -92,7 +93,8 @@
     ...(f.epMax ? [{ k: 'em', text: `≤${f.epMax}集`, off: () => set({ epmax: null }) }] : []),
     // 胶囊上写展示名，不写内部的归一名（原来是「madhouse ✕」，按钮上却是 Madhouse，#109）
     ...(f.studio ? [{ k: 'sd', text: sum.studio ?? f.studio, off: () => set({ studio: null }) }] : []),
-    ...(f.watch ? [{ k: 'w', text: sum.mine, off: () => set({ watch: null }) }] : [])
+    ...(f.watches ?? []).map((v) => ({ k: 'w' + v, text: MY_LABEL[v],
+      off: () => set({ watch: toggleIn(f.watches, v) }) }))
   ]);
 
 </script>
@@ -208,15 +210,12 @@
       </div>
     </FilterPill>
 
-    <FilterPill label="我的" summary={sum.mine} count={f.watch ? 1 : 0} w="20rem" align="right" muted={data.filtersMuted}>
-      <div class="flex flex-wrap gap-1.5">
-        <Chip on={!f.watch} href={to({ watch: null })}>全部</Chip>
-        <Chip on={f.watch === 'none'} href={to({ watch: f.watch === 'none' ? null : 'none' })}>未标记</Chip>
-        {#each WATCH_OPTS as [v, l]}
-          <Chip on={f.watch === v} href={to({ watch: f.watch === v ? null : v })}>{l}</Chip>
-        {/each}
-      </div>
-    </FilterPill>
+    <!-- 访客没有番单，「我的」无从筛起 -->
+    {#if data.user}
+      <FilterPill label="我的" summary={sum.mine} count={(f.watches ?? []).length} w="20rem" align="right" muted={data.filtersMuted}>
+        <MultiChip param="watch" opts={MY_OPTS} selected={f.watches} isDefault={!f.watches} href={to} />
+      </FilterPill>
+    {/if}
 
     <!-- 排序 / 我的筛选 / 重置是「动作」不是「条件」：打成一组靠右（ml-auto），一行放不下时整组一起换行，
          不会只剩「重置」一个孤零零掉到第二行（选了题材 + 年份后，1440 宽下原来就是这样）。
