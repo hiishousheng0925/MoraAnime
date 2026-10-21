@@ -16,8 +16,9 @@
  * 生成 catalog.json（版本 = 日期、sha256、大小、上游同步时间）。
  *
  * 发布到 GitHub Releases（--publish）缺省不执行，需要：
- *   MORA_GITHUB_TOKEN   有 contents:write 权限的 token
  *   MORA_GITHUB_REPO    owner/repo
+ *   MORA_GITHUB_TOKEN   有 contents:write 权限的 token；不设时向 git 凭据管理器要 repo 所属账号（owner）的授权
+ *                       （git push 登录过一次就有；计划任务以同一个 Windows 用户运行，取得到）
  * 发布到一个固定的 tag「catalog」（预发布版，免得占掉应用自动更新用的 latest），
  * 资产：catalog.json + catalog-<版本>.db.br，旧版本的数据包只留 --keep 份。
  */
@@ -27,6 +28,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { spawnSync } from 'node:child_process';
 import { createBrotliCompress, constants as Z } from 'node:zlib';
 import { CLEAR_ON_EXPORT, PERSONAL_ALL, ACCOUNT_TABLES, LOCAL_CONFIG } from '../desktop/catalog-tables.js';
 import { envValue } from '../src/lib/server/envFile.js';
@@ -142,10 +144,21 @@ async function hashFile(f) {
   return h.digest('hex');
 }
 
+/** 向 git 凭据管理器要 github.com 上某个账号的授权（不弹窗：GCM_INTERACTIVE=never）；拿不到返回 null */
+function credentialToken(user) {
+  const r = spawnSync('git', ['credential', 'fill'], {
+    input: `protocol=https\nhost=github.com\nusername=${user}\n\n`, encoding: 'utf8', timeout: 20000,
+    env: { ...process.env, GCM_INTERACTIVE: 'never', GIT_TERMINAL_PROMPT: '0' }
+  });
+  return r.status === 0 ? (r.stdout.match(/^password=(.+)$/m)?.[1] ?? null) : null;
+}
+
 /** 上传到 GitHub Releases 固定 tag「catalog」（预发布，不影响应用自动更新读的 latest） */
 async function publish(dir, file, manifest) {
-  const token = process.env.MORA_GITHUB_TOKEN, repo = process.env.MORA_GITHUB_REPO;
-  if (!token || !repo) throw new Error('--publish 需要 MORA_GITHUB_TOKEN 和 MORA_GITHUB_REPO');
+  const repo = process.env.MORA_GITHUB_REPO;
+  if (!repo) throw new Error('--publish 需要 MORA_GITHUB_REPO（owner/repo）');
+  const token = process.env.MORA_GITHUB_TOKEN || credentialToken(repo.split('/')[0]);
+  if (!token) throw new Error(`--publish 需要 MORA_GITHUB_TOKEN，或者先用 ${repo.split('/')[0]} 账号 git push 登录一次`);
   const TAG = process.env.MORA_CATALOG_TAG || 'catalog';
   const api = (p, init = {}) => fetch(`https://api.github.com/repos/${repo}${p}`, { ...init,
     headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...init.headers } });
