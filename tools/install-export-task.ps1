@@ -14,7 +14,8 @@
     -Src        源库路径（缺省不传 = 读 ~/.j-anime.env 的 J_ANIME_DATA 下的 j-anime.db）
     -Out        输出目录（缺省不传 = %LOCALAPPDATA%\MoraAnime-export）
     -Node       node.exe 路径（缺省取 PATH 里的）
-    -Publish    加上 --publish（需要在用户环境变量里配好 MORA_GITHUB_TOKEN / MORA_GITHUB_REPO）
+    -Publish    加上 --publish（仓库取 git remote origin；授权取 git 凭据管理器 —— 用仓库所属账号 git push 登录过一次即可，
+                也可以在用户环境变量里配 MORA_GITHUB_TOKEN / MORA_GITHUB_REPO 覆盖）
   日志写到 <输出目录>\export.log。
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -48,15 +49,18 @@ $log = Join-Path $Out 'export.log'
 # 经 cmd 跑是为了把输出追加进日志（计划任务本身不记 stdout）
 $cmdLine = "/c `"`"$Node`" $($nodeArgs -join ' ') >> `"$log`" 2>&1`""
 
-$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $cmdLine -WorkingDirectory $repo
+# 经隐藏窗口的 PowerShell 再调 cmd：Interactive 登录类型下直接跑 cmd 会在桌面闪一个黑窗口
+$psCmd = "-NoProfile -WindowStyle Hidden -Command `"& cmd.exe $($cmdLine -replace '"', '\"')`""
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $psCmd -WorkingDirectory $repo
 $trigger = New-ScheduledTaskTrigger -Daily -At $At
 # 错过了（关机 / 睡眠）就在下次开机后补跑；最多跑 1 小时
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1) -MultipleInstances IgnoreNew
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+# Interactive（用户登录着才跑，错过了登录后补跑）：S4U 不存密码、解不开 DPAPI，读不到凭据管理器里的 GitHub 授权，发布会失败
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
 Write-Output "任务名   $TaskName"
 Write-Output "时间     每天 $At"
-Write-Output "命令     cmd.exe $cmdLine"
+Write-Output "命令     powershell.exe $psCmd"
 Write-Output "工作目录 $repo"
 if ($PSCmdlet.ShouldProcess($TaskName, '注册计划任务')) {
   New-Item -ItemType Directory -Force $Out | Out-Null

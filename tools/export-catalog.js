@@ -144,6 +144,12 @@ async function hashFile(f) {
   return h.digest('hex');
 }
 
+/** 本仓库 origin 指向的 github.com/<owner>/<repo>；没有就返回 null */
+function originRepo() {
+  const r = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' });
+  return r.status === 0 ? (r.stdout.trim().match(/github\.com[/:]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1] ?? null) : null;
+}
+
 /** 向 git 凭据管理器要 github.com 上某个账号的授权（不弹窗：GCM_INTERACTIVE=never）；拿不到返回 null */
 function credentialToken(user) {
   const r = spawnSync('git', ['credential', 'fill'], {
@@ -155,8 +161,8 @@ function credentialToken(user) {
 
 /** 上传到 GitHub Releases 固定 tag「catalog」（预发布，不影响应用自动更新读的 latest） */
 async function publish(dir, file, manifest) {
-  const repo = process.env.MORA_GITHUB_REPO;
-  if (!repo) throw new Error('--publish 需要 MORA_GITHUB_REPO（owner/repo）');
+  const repo = process.env.MORA_GITHUB_REPO || originRepo();
+  if (!repo) throw new Error('--publish 需要 MORA_GITHUB_REPO（owner/repo），或者仓库有 github.com 的 origin');
   const token = process.env.MORA_GITHUB_TOKEN || credentialToken(repo.split('/')[0]);
   if (!token) throw new Error(`--publish 需要 MORA_GITHUB_TOKEN，或者先用 ${repo.split('/')[0]} 账号 git push 登录一次`);
   const TAG = process.env.MORA_CATALOG_TAG || 'catalog';
