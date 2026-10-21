@@ -13,7 +13,7 @@
  *   MORA_CATALOG_URL  番剧库 manifest 地址（见 catalog.js）
  *   MORA_NO_UPDATE=1  不检查应用更新
  */
-import { app, BrowserWindow, dialog, net, session, shell, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, session, shell, Menu } from 'electron';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync, renameSync } from 'node:fs';
@@ -255,7 +255,7 @@ function createWindow(origin) {
   mainWin = new BrowserWindow({
     ...ws.bounds, minWidth: 900, minHeight: 600, show: false, title: 'MoraAnime', backgroundColor: '#18181b',
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false }
+    webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false, preload: join(HERE, 'preload.cjs') }
   });
   if (ws.maximized) mainWin.maximize();
   const isLocal = (u) => { try { return new URL(u).origin === origin; } catch { return false; } };
@@ -329,12 +329,26 @@ async function checkAppUpdate() {
     au.autoInstallOnAppQuit = false;
     if (feed) { au.forceDevUpdateConfig = true; au.setFeedURL({ provider: 'generic', url: feed }); }
     au.on('error', (e) => log('[updater] 出错', String(e?.message || e)));
-    au.once('update-available', (info) => promptUpdate(au, info, portable));
+    au.once('update-available', (info) => {
+      pendingUpdate = { au, info, portable };
+      if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('mora:update', info.version);
+      promptUpdate(au, info, portable);
+    });
     await au.checkForUpdates().catch((e) => log('[updater] 检查更新失败（静默）', String(e?.message || e)));
   } catch (e) {
     log('[updater] 不可用', String(e?.message || e));
   }
 }
+
+// 检查到的新版本（右上角提示 + 重新打开弹窗用）；关掉弹窗后它还在，提示一直挂着直到更新
+let pendingUpdate = null, updDlg = null, updDownloading = false;
+ipcMain.handle('mora:update-state', () => pendingUpdate?.info.version ?? null);
+ipcMain.handle('mora:pick-folder', async (_e, defaultPath) => {
+  const r = await dialog.showOpenDialog(mainWin, { title: '选择截图保存位置', defaultPath: defaultPath || undefined,
+    properties: ['openDirectory', 'createDirectory'] });
+  return r.canceled ? null : r.filePaths[0] ?? null;
+});
+ipcMain.on('mora:open-update', () => { if (pendingUpdate) promptUpdate(pendingUpdate.au, pendingUpdate.info, pendingUpdate.portable); });
 
 // 弹窗跟着客户端当前主题走：从主窗口读 --c-* 变量传给 update.html
 const THEME_VARS = ['--c-bg', '--c-surface', '--c-surface-2', '--c-border', '--c-text', '--c-text-soft',
@@ -348,6 +362,7 @@ const THEME_VARS = ['--c-bg', '--c-surface', '--c-surface-2', '--c-border', '--c
 async function promptUpdate(au, info, portable) {
   const win = mainWin && !mainWin.isDestroyed() ? mainWin : null;
   if (!win) return;
+  if (updDlg && !updDlg.isDestroyed()) { updDlg.focus(); return; }
   log(`[updater] 有新版本 ${info.version}，弹窗`);
   const theme = await win.webContents.executeJavaScript(
     `(() => { const s = getComputedStyle(document.documentElement);
@@ -358,16 +373,17 @@ async function promptUpdate(au, info, portable) {
     resizable: false, movable: false, minimizable: false, maximizable: false, skipTaskbar: true, show: false,
     x: b.x, y: b.y, width: b.width, height: b.height, title: 'MoraAnime 更新',
     webPreferences: { sandbox: true, contextIsolation: true, spellcheck: false } });
+  updDlg = dlg;
+  dlg.on('closed', () => { updDlg = null; });
   dlg.setMenu(null);
   dlg.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   dlg.webContents.on('will-navigate', (e) => e.preventDefault());
   const run = (js) => { if (!dlg.isDestroyed()) dlg.webContents.executeJavaScript(js).catch(() => {}); };
   const link = DOWNLOAD + (portable ? 'MoraAnime-portable.exe' : 'MoraAnime-Setup.exe');
 
-  let downloading = false;
   const download = () => {
-    if (downloading) return;
-    downloading = true;
+    if (updDownloading) return;
+    updDownloading = true;
     log('[updater] 用户选择立即更新，开始下载');
     run('progress(0)');
     au.on('download-progress', (p) => {
@@ -382,7 +398,7 @@ async function promptUpdate(au, info, portable) {
     au.downloadUpdate().catch((e) => {
       const msg = String(e?.message || e).slice(0, 200);
       log('[updater] 下载失败', msg);
-      downloading = false;
+      updDownloading = false;
       if (!win.isDestroyed()) win.setProgressBar(-1);
       run(`failed(${JSON.stringify(msg)})`);
     });
@@ -431,7 +447,9 @@ if (!app.requestSingleInstanceLock()) {
       await win.loadURL(origin + '/');
       log(`启动完成 ${Date.now() - t0}ms`);
       writeState({ lastStartupMs: Date.now() - t0 });
-      setTimeout(() => { checkCatalogUpdate(); checkAppUpdate(); }, 5000);
+      // 应用更新只读一个 latest.yml，开窗口后很快就能弹（原来 5 秒后才查、旧版还要先下完安装包，主人实测约 20 秒）
+      setTimeout(checkAppUpdate, 1500);
+      setTimeout(checkCatalogUpdate, 5000);
     } catch (e) {
       log('启动失败', String(e?.stack || e));
       dialog.showErrorBox('MoraAnime 启动失败', String(e?.message || e));

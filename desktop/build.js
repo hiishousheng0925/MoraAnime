@@ -56,7 +56,7 @@ snapshotSync(ROOT, BUILD);
 step('主进程代码 + package.json');
 rmSync(join(STAGE, 'desktop'), { recursive: true, force: true });
 mkdirSync(join(STAGE, 'desktop'), { recursive: true });
-for (const f of ['main.js', 'catalog.js', 'db-tasks.js', 'catalog-tables.js', 'guard.mjs', 'update.html'])
+for (const f of ['main.js', 'catalog.js', 'db-tasks.js', 'catalog-tables.js', 'guard.mjs', 'update.html', 'preload.cjs'])
   cpSync(join(HERE, f), join(STAGE, 'desktop', f));
 cpSync(join(HERE, 'assets'), join(STAGE, 'desktop', 'assets'), { recursive: true });
 
