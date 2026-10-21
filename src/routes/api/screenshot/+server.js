@@ -35,6 +35,6 @@ export async function POST({ request, url, locals }) {
     if (typeof b.token !== 'string' || !/^[\w-]{8,40}$/.test(b.token)) return json({ error: '参数不对' }, { status: 400 });
     return json({ ok: true, file: await grabShot({ ...meta, token: b.token }) });
   } catch (e) {
-    return json({ error: String(e.message ?? e) }, { status: 400 });
+    return json({ error: String(e.message ?? e) }, { status: e.code === 'BUSY' ? 429 : 400 });
   }
 }

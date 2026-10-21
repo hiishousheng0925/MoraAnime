@@ -7,7 +7,7 @@
 import { getDb } from '../db.js';
 import { GENRE_MAP, TAG_TO_GENRE } from '../../genres.js';
 import { listAnime } from './catalog.js';
-import { getSetting, yearWindow } from './prefs.js';
+import { hideNsfw, yearWindow } from './prefs.js';
 
 /**
  * 首页的「推荐」区 —— 必须在任何状态下都有内容，否则首页会变成死胡同。
@@ -22,7 +22,7 @@ export function recommend(limit = 12) {
    * 原来只有 ① 走 listAnime 套了窗口，②③ 手写 SQL 全漏了，且用的是会过期的原始 status ——
    * 打开「隐藏 NSFW」后兜底推荐里仍可能出现成人内容。
    */
-  const nsfw = getSetting('hide_nsfw', '0') === '1';
+  const nsfw = hideNsfw();
   const { min: yMin, max: yMax } = yearWindow();
   const SITE = `a.is_stub=0 AND a.is_jp=1 AND a.type='TV' AND coalesce(a.status_eff,a.status)='FINISHED'
     AND (a.year IS NULL OR (a.year >= ${yMin} AND a.year <= ${yMax}))${nsfw ? ' AND a.is_nsfw=0' : ''}`;

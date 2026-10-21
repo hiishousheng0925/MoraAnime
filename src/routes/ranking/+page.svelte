@@ -13,8 +13,9 @@
   import YearPill from '$lib/ui/YearPill.svelte';
   import CoverBackdrop from '$lib/ui/CoverBackdrop.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
+  import { EXIT } from '$lib/ui/btn.js';
   import { dispTitle, yearText } from '$lib/format.js';
-  import { TYPE_CN, TYPE_OPTS, WATCH_STATUS, showScore } from '$lib/constants.js';
+  import { TYPE_CN, TYPE_OPTS, WATCH_STATUS, MY_STATUS_TAG, showScore } from '$lib/constants.js';
   import { makeHref } from '$lib/urlState.js';
   import { page as pg } from '$app/state';
   import Page from '$lib/ui/Page.svelte';
@@ -43,13 +44,6 @@
     { ink: 'text-bronze', stroke: 'var(--c-bronze)', ring: 'border-bronze/35' }
   ];
   /** 我的状态小标签（页面底色 / 卡片上用，不是压在封面上的那套） */
-  const MARK = {
-    watching: 'bg-accent/15 text-accent-ink',
-    completed: 'bg-live/15 text-live-ink',
-    plan: 'bg-ink-700 text-ink-200',
-    on_hold: 'bg-ink-700 text-ink-200',
-    dropped: 'bg-ink-700 text-ink-200'
-  };
   // 分隔符显式拼：模板里 `{year}{#if} · …` 的前导空格会被 Svelte 吃掉（「2008· 24集」）
   const meta = (a) => [yearText(a), a.episodes ? `${a.episodes} 集` : null].filter(Boolean).join(' · ');
   const score = (a) => (showScore(a) ? a.bgm_score.toFixed(1) : '—');
@@ -57,7 +51,7 @@
 
 {#snippet mark(a)}
   {#if a.my_status}
-    <span class="shrink-0 rounded px-1.5 py-px text-[11px] font-medium {MARK[a.my_status]}">{WATCH_STATUS[a.my_status]}</span>
+    <span class="shrink-0 rounded px-1.5 py-px text-[11px] font-medium {MY_STATUS_TAG[a.my_status] ?? ''}">{WATCH_STATUS[a.my_status]}</span>
   {/if}
 {/snippet}
 
@@ -95,7 +89,7 @@
     <div class="mt-6">
       <EmptyState title="此范围暂无 Bangumi 评分数据" icon={Trophy}>
         {#if data.type || timeCount}
-          <a href="/ranking" class="tap inline-flex items-center rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-[13px] text-ink-200 hover:border-ink-400">看全部排名</a>
+          <a href="/ranking" class={EXIT}>看全部排名</a>
         {/if}
       </EmptyState>
     </div>

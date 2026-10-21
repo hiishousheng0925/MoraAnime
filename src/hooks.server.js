@@ -29,7 +29,11 @@ function readPrefs(cookies) {
   } catch { return {}; }
 }
 
-const starts = (p, list) => list.some((x) => p.startsWith(x));
+/**
+ * 按路径段匹配，不按字符串前缀（2026-10-21 审核）：'/api/settings' 原来会把将来的 '/api/settings-site'
+ * 也当成访客可写。清单里以 / 结尾的（'/api/admin/'、'/api/stream/'）本来就只管子路径，照旧按前缀
+ */
+const starts = (p, list) => list.some((x) => (x.endsWith('/') ? p.startsWith(x) : p === x || p.startsWith(x + '/')));
 const deny = (status, msg) => new Response(JSON.stringify({ error: msg }), {
   status, headers: { 'content-type': 'application/json' }
 });

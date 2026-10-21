@@ -65,7 +65,7 @@
         <label class="block">
           <span class="mb-1 block text-[12px] text-ink-400">再输一次新密码</span>
           <input bind:value={again} type="password" autocomplete="new-password" required minlength="8"
-                 class="{INPUT} {mismatch ? 'border-red-400/70' : ''}" aria-invalid={mismatch} />
+                 class="{INPUT} {mismatch ? 'border-danger/70' : ''}" aria-invalid={mismatch} />
         </label>
         {#if error}<p class="text-[13px] text-danger" role="alert">{error}</p>{/if}
         <button type="submit" disabled={busy || newPw.length < 8 || mismatch || !oldPw}

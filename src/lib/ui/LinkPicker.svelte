@@ -2,6 +2,8 @@
   /** 手动补关联。AOD 有 43.8% 的条目没有任何关系数据，靠这个补。 */
   import { dispTitle } from '$lib/format.js';
   import { invalidateAll } from '$app/navigation';
+  import { post } from '$lib/api.js';
+  import { toast } from '$lib/toast.svelte.js';
   let { animeId, links = [] } = $props();
 
   let open = $state(false);
@@ -9,21 +11,20 @@
   let rows = $state([]);
   let busy = $state(false);
 
+  /** 失败返回 null 并 toast（原来裸 fetch 不看结果，关联没建上也照样清空搜索框，像是成功了） */
   async function api(body) {
     busy = true;
-    try {
-      return await fetch('/api/relation', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: animeId, ...body }) }).then((r) => r.json());
-    } finally { busy = false; }
+    try { return await post('/api/relation', { id: animeId, ...body }); }
+    catch (e) { toast.error(e); return null; }
+    finally { busy = false; }
   }
   async function search() {
     if (!kw.trim()) { rows = []; return; }
     const r = await api({ op: 'search', q: kw.trim() });
-    rows = r.rows ?? [];
+    if (r) rows = r.rows ?? [];
   }
-  const link = async (id) => { await api({ op: 'link', other: id }); kw = ''; rows = []; await invalidateAll(); };
-  const unlink = async (id) => { await api({ op: 'unlink', other: id }); await invalidateAll(); };
+  const link = async (id) => { if (await api({ op: 'link', other: id })) { kw = ''; rows = []; await invalidateAll(); } };
+  const unlink = async (id) => { if (await api({ op: 'unlink', other: id })) await invalidateAll(); };
 </script>
 
 <div class="text-[12px]">

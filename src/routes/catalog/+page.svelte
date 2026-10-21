@@ -9,35 +9,28 @@
   import YearPill from '$lib/ui/YearPill.svelte';
   import SaveFilter from '$lib/ui/SaveFilter.svelte';
   import { GENRE_NAMES } from '$lib/genres.js';
-  import { TYPE_OPTS, TYPE_CN, STATUS_OPTS, STATUS_CN, SEASON_OPTS, SEASON_OPTS_M, SEASON_CN, WEEKDAY_OPTS, WATCH_OPTS, WATCH_STATUS, SORT_OPTS, DECADE_OPTS, DEFAULT_SORT, DEFAULT_SORT2, STATUS_OPTS_ALL } from '$lib/constants.js';
+  import { TYPE_OPTS, TYPE_CN, STATUS_CN, SEASON_CN, WEEKDAY_OPTS, WATCH_OPTS, WATCH_STATUS, SORT_OPTS, DEFAULT_SORT, DEFAULT_SORT2, STATUS_OPTS_ALL } from '$lib/constants.js';
   import { makeSetter, makeHref, toggleIn } from '$lib/urlState.js';
+  import { moveGenre as moveIn, genreSummary } from '$lib/urlBuild.js';
   import { page as pg } from '$app/state';
   import Page from '$lib/ui/Page.svelte';
   import ResetButton from '$lib/ui/ResetButton.svelte';
   import SearchBox from '$lib/ui/SearchBox.svelte';
   import GenrePicker from '$lib/ui/GenrePicker.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
-  import X from 'phosphor-svelte/lib/X';
+  import ActiveChips from '$lib/ui/ActiveChips.svelte';
+  import { EXIT } from '$lib/ui/btn.js';
   import { edgeFade } from '$lib/edgeFade.js';
   let { data } = $props();
 
   let studioKw = $state('');
-  /** 空结果里的出口胶囊 */
-  const EXIT = 'tap rounded-full border border-ink-600 bg-ink-900 px-3.5 py-1.5 text-[13px] text-ink-200 transition hover:border-accent hover:text-accent-ink';
 
   const f = $derived(data.f);
   const set = $derived(makeSetter('/catalog', pg.url.searchParams));
   const to = $derived(makeHref('/catalog', pg.url.searchParams));
   const years = $derived(data.facets.years);
-  /** 把某个题材放进指定槽位，并从其他槽位移除（同一题材只能在一个槽位） */
-  function moveGenre(target, g) {
-    const cur = { g: f.genres, any: f.genresAny, ng: f.genresNot };
-    const has = cur[target].includes(g);
-    const out = {};
-    for (const k of ['g', 'any', 'ng']) out[k] = cur[k].filter((x) => x !== g);
-    if (!has) out[target] = [...out[target], g];
-    return { g: out.g, any: out.any, ng: out.ng, gm: null };
-  }
+  /** 把某个题材放进指定槽位（见 urlBuild.js）；目录页顺带清掉 gm（题材面板的模式参数） */
+  const moveGenre = (target, g) => ({ ...moveIn(f, target, g), gm: null });
 
   let studioSort = $state('count');   // count | name
   const shownStudios = $derived.by(() => {
@@ -65,14 +58,7 @@
     // 默认的完结状态确实排除了未上映）—— 否则用户看不出东西是被默认藏掉的。
     // 题材「全部」不缩小结果，所以不高亮。
     type: f.types ? f.types.map((t) => TYPE_CN[t] ?? t).join('·') : null,
-    genre: (() => {
-      const parts = [];
-      if (f.genres.length) parts.push(f.genres.join('+'));
-      if (f.genresAny.length) parts.push(`(${f.genresAny.join('|')})`);
-      if (f.genresNot.length) parts.push(`−${f.genresNot.join(',')}`);
-      const t = parts.join(' ');
-      return t ? (t.length > 18 ? t.slice(0, 17) + '…' : t) : null;
-    })(),
+    genre: genreSummary(f),
     time: f.season ? `${f.yearMin}${SEASON_CN[f.season]}`
         : f.yearMax && f.yearMin !== f.yearMax ? `${f.yearMin}–${f.yearMax}`
         : !f.yearIsDefault ? `${f.yearMin}` : null,
@@ -274,21 +260,8 @@
   </div>
 
   <!-- 已生效筛选：看得见、可逐项删（手机上同样单行横滑） -->
-  {#if chips.length}
-    <!-- 搜索时这些筛选没生效，跟着置灰 -->
-    <div use:edgeFade class="mt-2 flex flex-wrap items-center gap-1.5
-                max-sm:-mx-4 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:overscroll-x-contain max-sm:px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden
-                {data.filtersMuted ? 'pointer-events-none opacity-40' : ''}">
-      {#each chips as c (c.k)}
-        <button onclick={c.off} aria-label="移除 {c.text}"
-                class="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border py-1 pl-3 pr-2 text-[12px] transition
-                       {c.tone === 'danger' ? 'border-danger/40 bg-danger/10 text-danger hover:border-danger'
-                                            : 'border-accent/40 bg-accent/10 text-accent-ink hover:border-accent'}">
-          {c.text}<X size={12} weight="bold" aria-hidden="true" />
-        </button>
-      {/each}
-    </div>
-  {/if}
+  <!-- 搜索时这些筛选没生效，跟着置灰 -->
+  <ActiveChips {chips} muted={data.filtersMuted} />
 
   {#if !data.rows.length}
     <!-- 空结果：标题就是状态；下面给 1–3 个真能救回结果的出口（按实际情况出现） -->

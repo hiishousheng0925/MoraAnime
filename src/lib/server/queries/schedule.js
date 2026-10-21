@@ -17,7 +17,7 @@
  * 那是他自己加的，「我在追的」也不滤。
  */
 import { getDb } from '../db.js';
-import { yearWindow, getSetting } from './prefs.js';
+import { yearWindow, hideNsfw } from './prefs.js';
 import { SCHED_COLS } from './catalog.js';
 
 const DAY = 86_400_000;
@@ -47,7 +47,7 @@ export function airInfo(r, now = new Date()) {
 
 export function schedule(scope = 'mine') {
   const db = getDb();
-  const nsfw = getSetting('hide_nsfw', '0') === '1' ? 'AND a.is_nsfw = 0' : '';
+  const nsfw = hideNsfw() ? 'AND a.is_nsfw = 0' : '';
   const rows = scope === 'mine'
     ? db.prepare(`SELECT ${SCHED_COLS}, a.bgm_air_start, ue.status AS my_status, ue.current_episode, ue.my_score, ue.my_note
          FROM user_entry ue JOIN anime a ON a.id = ue.anime_id

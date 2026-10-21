@@ -15,6 +15,8 @@
   import Chip from '$lib/ui/Chip.svelte';
   import CoverBackdrop from '$lib/ui/CoverBackdrop.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
+  import { centerCurrent } from '$lib/centerCurrent.js';
+  import { EXIT } from '$lib/ui/btn.js';
   import { dispTitle } from '$lib/format.js';
   import { SEASON_CN, WEEKDAY_OPTS, WATCH_STATUS, TYPE_CN, MY_STATUS_BADGE, showScore } from '$lib/constants.js';
   import { entry } from '$lib/api.js';
@@ -78,16 +80,6 @@
   /** 双层进度条的分母：总集数；没有就用已播 / 已看里大的那个 */
   const denom = (a) => (a.episodes > 0 ? a.episodes : Math.max(a.aired ?? 0, a.current_episode ?? 0, 1));
   const pct = (n, a) => `${Math.min(100, Math.round(((n ?? 0) / denom(a)) * 100))}%`;
-
-  /** 日历条：手机上把选中的那格滚到中间 */
-  let strip = $state(null);
-  $effect(() => {
-    void data.wd;
-    const on = strip?.querySelector('[aria-current="true"]');
-    if (on && strip.scrollWidth > strip.clientWidth) {
-      strip.scrollLeft = on.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2;
-    }
-  });
 </script>
 
 {#snippet bookmark(a, watching, pos = 'right-0 top-0')}
@@ -128,7 +120,7 @@
           {:else if a.type !== 'TV'}
             <span class="rounded-md bg-black/70 px-1.5 py-0.5 text-[10.5px] text-white backdrop-blur-sm">{TYPE_CN[a.type] ?? a.type}</span>
           {/if}
-          {#if a.is_short}<span class="rounded-md bg-amber-950/70 px-1.5 py-0.5 text-[10.5px] text-white">泡面</span>{/if}
+          {#if a.is_short}<span class="rounded-md bg-short-badge/70 px-1.5 py-0.5 text-[10.5px] text-white">泡面</span>{/if}
         </div>
         {#if badge || showScore(a)}
           <div class="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent px-1.5 pb-1.5 pt-7">
@@ -228,7 +220,7 @@
   <!-- 日历条（主人 2026-10-21 第 8 条：原来每格三行 11px 小字、格子 68px 高，像一排大按钮）。
        桌面一行 44px：「周三 10.21」+ 右侧部数；手机两行 52px：星期 / 部数，日期收进 aria-label。
        选中语言和季度浏览的季度条一致：选中 = accent 实色底 + on-accent 字；今天未选中 = accent 描边 -->
-  <nav aria-label="星期" bind:this={strip}
+  <nav aria-label="星期" use:centerCurrent={data.wd}
        class="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto max-sm:-mx-4 max-sm:px-4 max-sm:pb-3 sm:pb-2.5">
     {#each WEEKDAY_OPTS as [v, l]}
       {@const on = data.wd === v}
@@ -261,8 +253,8 @@
     <div class="mt-6">
       {#if data.scope === 'mine'}
         <EmptyState title="在看列表中没有本季在播的番" icon={CalendarBlank}>
-          <a href={to({ scope: null })} class="tap inline-flex items-center rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-[13px] text-ink-200 hover:border-ink-400">浏览本季全部</a>
-          <a href="/catalog?status=ONGOING" class="tap inline-flex items-center rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-[13px] text-ink-200 hover:border-ink-400">全部连载中作品</a>
+          <a href={to({ scope: null })} class={EXIT}>浏览本季全部</a>
+          <a href="/catalog?status=ONGOING" class={EXIT}>全部连载中作品</a>
         </EmptyState>
       {:else}
         <EmptyState title="暂无放送表数据" icon={CalendarBlank} />
@@ -280,8 +272,8 @@
         {@const cold = rest.filter(isCold)}
         <section class="{data.wd ? '' : 'mb-8'}">
           {#if !data.wd}
-            <!-- 全周：每天一个吸顶小节头（顶栏 53px 下面） -->
-            <h2 class="sticky top-[53px] z-20 -mx-4 mb-3 flex items-baseline gap-2 px-4 py-2 text-[15px] font-semibold backdrop-blur
+            <!-- 全周：每天一个吸顶小节头（顶栏 --hdr-h 下面） -->
+            <h2 class="sticky top-[var(--hdr-h)] z-20 -mx-4 mb-3 flex items-baseline gap-2 px-4 py-2 text-[15px] font-semibold backdrop-blur
                        {isToday ? 'bg-[color-mix(in_srgb,var(--c-accent)_14%,var(--c-bg))] text-accent-ink shadow-[inset_3px_0_0_var(--c-accent)]'
                                 : `bg-ink-950/90 ${past ? 'text-ink-400' : 'text-ink-100'}`}">
               {WD[day.wd]}
@@ -294,13 +286,13 @@
             {@const nb = neighbours(day.wd)}
             <EmptyState title="{isToday ? '今天' : WD[day.wd]}没有在播的番" icon={CalendarBlank}>
               {#each nb as n (n.v)}
-                <a href={to({ wd: n.v })} class="tap inline-flex items-center rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-[13px] text-ink-200 hover:border-accent hover:text-accent">
+                <a href={to({ wd: n.v })} class={EXIT}>
                   {n.dir < 0 ? '← ' : ''}{WD[n.v]} · {counts[n.v]} 部{n.dir > 0 ? ' →' : ''}
                 </a>
               {/each}
               <!-- 七天都空、番全在「不在本季放送表」里（我在追的都是旧番 / 网络番）：原来是死胡同，只有全周视图才看得到它们 -->
               {#if !nb.length && data.noDay.length}
-                <a href={to({ wd: 'all' })} class="tap inline-flex items-center rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-[13px] text-ink-200 hover:border-accent hover:text-accent">
+                <a href={to({ wd: 'all' })} class={EXIT}>
                   不在本季放送表 · {data.noDay.length} 部 →
                 </a>
               {/if}
@@ -340,7 +332,7 @@
 
       {#if data.noDay.length && !data.wd}
         <section>
-          <h2 class="sticky top-[53px] z-20 -mx-4 mb-3 flex items-baseline gap-2 bg-ink-950/90 px-4 py-2 text-[15px] font-semibold text-ink-100 backdrop-blur">
+          <h2 class="sticky top-[var(--hdr-h)] z-20 -mx-4 mb-3 flex items-baseline gap-2 bg-ink-950/90 px-4 py-2 text-[15px] font-semibold text-ink-100 backdrop-blur">
             不在本季放送表<span class="ml-auto text-[12px] font-normal text-ink-400">{data.noDay.length} 部</span>
           </h2>
           <div class="grid grid-cols-3 gap-x-2.5 gap-y-4 sm:grid-cols-4 sm:gap-x-3.5 sm:gap-y-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">

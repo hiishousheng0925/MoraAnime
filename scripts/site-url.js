@@ -8,12 +8,12 @@
  *
  * 优先级：J_ANIME_URL 环境变量 > 正在跑的正式站 > dev server
  */
-import { spawnSync } from 'node:child_process';
+import { tailscaleIp } from './platform.js';
 
 export function siteUrl() {
   if (process.env.J_ANIME_URL) return process.env.J_ANIME_URL.replace(/\/$/, '');
   const port = process.env.PORT || '3000';
-  const ip = spawnSync('tailscale', ['ip', '-4'], { encoding: 'utf8' }).stdout?.trim().split('\n')[0];
+  const ip = tailscaleIp();
   if (ip) return `http://${ip}:${port}`;
   return `http://127.0.0.1:${port}`;
 }

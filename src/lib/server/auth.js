@@ -61,10 +61,17 @@ export const USERNAME_RE = /^[\p{L}\p{N}_.-]{2,24}$/u;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const PW_MIN = 8;
 
+/**
+ * 注册和改资料共用同一套校验（2026-10-21 审核：updateAccount 原来自己抄了一份，漏了邮箱 120 字符上限）
+ * @returns {string|null} 不合格的原因
+ */
+const checkUsername = (username) => (USERNAME_RE.test(username ?? '') ? null : '用户名 2–24 位，只能是文字、数字、_ . -');
+const checkEmail = (email) => (EMAIL_RE.test(email ?? '') && email.length <= 120 ? null : '邮箱格式不对');
+
 /** @returns {string|null} 不合格的原因 */
 function checkFields({ username, email, password }) {
-  if (!USERNAME_RE.test(username ?? '')) return '用户名 2–24 位，只能是文字、数字、_ . -';
-  if (!EMAIL_RE.test(email ?? '') || email.length > 120) return '邮箱格式不对';
+  const bad = checkUsername(username) ?? checkEmail(email);
+  if (bad) return bad;
   if (String(password ?? '').length < PW_MIN) return `密码至少 ${PW_MIN} 位`;
   if (String(password).length > 200) return '密码太长';
   return null;
@@ -110,13 +117,15 @@ export function updateAccount(id, { username, email }) {
   const d = db();
   if (username !== undefined) {
     username = String(username).trim();
-    if (!USERNAME_RE.test(username)) return '用户名 2–24 位，只能是文字、数字、_ . -';
+    const bad = checkUsername(username);
+    if (bad) return bad;
     if (d.prepare('SELECT 1 FROM account WHERE username = ? AND id <> ?').get(username, id)) return '用户名已被使用';
     d.prepare('UPDATE account SET username = ? WHERE id = ?').run(username, id);
   }
   if (email !== undefined) {
     email = String(email).trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) return '邮箱格式不对';
+    const bad = checkEmail(email);
+    if (bad) return bad;
     if (d.prepare('SELECT 1 FROM account WHERE email = ? AND id <> ?').get(email, id)) return '这个邮箱已被其他账号使用';
     d.prepare('UPDATE account SET email = ?, email_verified_at = NULL WHERE id = ?').run(email, id);
   }
@@ -136,6 +145,10 @@ export function changePassword(id, oldPw, newPw) {
 // ── 会话 ───────────────────────────────────────────────────
 export function createSession(userId, userAgent = '') {
   const token = randomBytes(32).toString('base64url');
+  // 顺手清掉所有账号已过期的会话（2026-10-21 审核）：sessionUser 只删「拿着过期令牌来的」，
+  // 换了设备 / 清了 cookie 的那些永远不会再来，原来会一直留在表里。
+  // expires_at 是 datetime('now', ...) 写的 UTC 'YYYY-MM-DD HH:MM:SS' 文本，和 datetime('now') 直接按字符串比
+  db().prepare("DELETE FROM session WHERE expires_at < datetime('now')").run();
   db().prepare(`INSERT INTO session (token_hash, user_id, expires_at, user_agent)
                 VALUES (?, ?, datetime('now', '+${MAX_AGE} seconds'), ?)`)
     .run(sha(token), userId, String(userAgent).slice(0, 200));
@@ -172,7 +185,8 @@ export const listAllow = () => db().prepare(`SELECT email, datetime(created_at, 
   EXISTS(SELECT 1 FROM account a WHERE a.email = s.email) AS registered FROM signup_allow s ORDER BY created_at DESC`).all();
 export function addAllow(email) {
   email = String(email ?? '').trim().toLowerCase();
-  if (!EMAIL_RE.test(email)) return '邮箱格式不对';
+  const bad = checkEmail(email);   // 超长的邮箱反正注册不了，白名单里也不收
+  if (bad) return bad;
   db().prepare('INSERT OR IGNORE INTO signup_allow (email) VALUES (?)').run(email);
   return null;
 }

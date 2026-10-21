@@ -2,6 +2,7 @@
   import CardGrid from '$lib/ui/CardGrid.svelte';
   import Section from '$lib/ui/Section.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
+  import { CTA } from '$lib/ui/btn.js';
   import Page from '$lib/ui/Page.svelte';
   import LoginGate from '$lib/ui/LoginGate.svelte';
   import Television from 'phosphor-svelte/lib/Television';
@@ -40,7 +41,7 @@
 
   {#if data.total === 0}
     <EmptyState title="暂无观看记录" icon={Television}>
-      <a href="/triage" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent">去快速标记 →</a>
+      <a href="/triage" class={CTA}>去快速标记 →</a>
     </EmptyState>
   {:else}
     <Hero {data} />

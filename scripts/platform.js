@@ -11,6 +11,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const IS_WIN = process.platform === 'win32';
+
+/**
+ * 本机的 tailnet IPv4（取不到返回 ''）。站点只监听这个地址，健康检查 / 测试站地址都靠它。
+ * 原来 5 处各写一遍，有的按 \n 切 —— Windows 输出是 \r\n，切出来的 IP 带着 \r（2026-10-21 审核）
+ */
+export function tailscaleIp() {
+  return spawnSync('tailscale', ['ip', '-4'], { encoding: 'utf8' }).stdout?.trim().split(/\r?\n/)[0]?.trim() ?? '';
+}
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const VITE_BIN = join(ROOT, 'node_modules/vite/bin/vite.js');

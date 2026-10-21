@@ -17,7 +17,7 @@
   let btn = $state(null);
   // 打开时把焦点落到确认键：回车即确认、Esc 取消，和原生弹窗的键盘习惯一致
   $effect(() => { if (open && btn) btn.focus(); });
-  const okCls = $derived(danger ? 'bg-red-600 text-white' : 'bg-accent text-on-accent');
+  const okCls = $derived(danger ? 'bg-danger-fill text-white' : 'bg-accent text-on-accent');
 </script>
 
 {#snippet content(mobile)}

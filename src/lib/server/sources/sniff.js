@@ -14,6 +14,8 @@
  */
 import { existsSync } from 'node:fs';
 import { assertPublic } from './scrape.js';
+import { AD } from './resolve.js';
+import { limiter } from './limit.js';
 
 const CANDIDATES = [
   process.env.J_ANIME_CHROME,
@@ -28,29 +30,30 @@ const CHROME = CANDIDATES.find((p) => existsSync(p)) ?? null;
 export const WAIT_MS = 8_000;
 const IDLE_MS = 5 * 60_000;
 const MAX_PARALLEL = 2;
+/** 排队上限（2026-10-21 审核）：再多就直接回「繁忙」，排在第 7 个之后的等到也早过了解析预算 */
+const MAX_QUEUE = 6;
 const MEDIA = /\.(?:m3u8|mp4)(?:\?|$)/i;
-/** 片头广告 / 占位视频，和 resolve.js 同一套 */
-const AD = /(?:^|[/_.-])(?:ads?|adposter|advert|preroll|loading|logo)(?:[/_.-]|\d|$)/i;
 
-let browser = null, idleTimer = null, running = 0;
-const queue = [];
+let browser = null, idleTimer = null;
 
+// 启动中的那次也要记住：MAX_PARALLEL=2，两个嗅探同时撞上冷启动会各开一个 Chrome，
+// 先开的那个被覆盖后没人引用，空闲定时器也关不到它（审核发现，2026-10-21）
+let launching = null;
 async function getBrowser() {
   clearTimeout(idleTimer);
   if (browser?.isConnected()) return browser;
-  const { chromium } = await import('playwright-core');
-  browser = await chromium.launch({ executablePath: CHROME, headless: true,
-    args: ['--mute-audio', '--autoplay-policy=no-user-gesture-required', '--disable-gpu'] });
-  return browser;
+  launching ??= (async () => {
+    const { chromium } = await import('playwright-core');
+    browser = await chromium.launch({ executablePath: CHROME, headless: true,
+      args: ['--mute-audio', '--autoplay-policy=no-user-gesture-required', '--disable-gpu'] });
+    return browser;
+  })().finally(() => { launching = null; });
+  return launching;
 }
 const scheduleIdle = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => { browser?.close().catch(() => {}); browser = null; }, IDLE_MS); };
 
 /** 同时最多 MAX_PARALLEL 个嗅探，多的排队（一屏点好几集时别同时开一堆浏览器页） */
-async function slot(fn) {
-  if (running >= MAX_PARALLEL) await new Promise((r) => queue.push(r));
-  running++;
-  try { return await fn(); } finally { running--; queue.shift()?.(); if (!running) scheduleIdle(); }
-}
+const slot = limiter(MAX_PARALLEL, MAX_QUEUE, { onIdle: scheduleIdle });
 
 /**
  * 嗅到的若是一张套壳播放器页（baimao 的 artplayer/index.html?url=…m3u8），取它参数里的地址。
@@ -68,12 +71,17 @@ function mediaOf(u, isMedia = false) {
 }
 
 
-/** @returns {Promise<{url:string, referer:string}|null>} */
-export function sniffPlay(playUrl, userAgent) {
+/**
+ * @param {AbortSignal} [signal] 浏览器断开 / 换了一集：排队中的直接出队，跑着的提前关页（2026-10-21 审核）
+ * @returns {Promise<{url:string, referer:string}|null>} 队列满时抛 code = 'BUSY'
+ */
+export function sniffPlay(playUrl, userAgent, signal) {
   if (!CHROME) return Promise.resolve(null);
   return slot(async () => {
+    if (signal?.aborted) return null;
     const b = await getBrowser();
     const ctx = await b.newContext({ userAgent, javaScriptEnabled: true });
+    let onAbort;
     try {
       await ctx.route('**/*', async (route) => {
         const req = route.request();
@@ -86,11 +94,13 @@ export function sniffPlay(playUrl, userAgent) {
         ctx.on('request', (r) => hit(r.url(), r.headers().referer, r.resourceType() === 'media'));
         ctx.on('response', (r) => { if (/mpegurl|^video\//i.test(r.headers()['content-type'] ?? '')) hit(r.url(), r.request().headers().referer, true); });
       });
+      const cancelled = new Promise((r) => { onAbort = () => r(null); signal?.addEventListener('abort', onAbort, { once: true }); });
       const page = await ctx.newPage();
       page.goto(playUrl, { waitUntil: 'domcontentloaded', timeout: WAIT_MS }).catch(() => {});
-      return await Promise.race([found, new Promise((r) => setTimeout(() => r(null), WAIT_MS))]);
+      return await Promise.race([found, cancelled, new Promise((r) => setTimeout(() => r(null), WAIT_MS))]);
     } finally {
+      signal?.removeEventListener('abort', onAbort);
       await ctx.close().catch(() => {});
     }
-  });
+  }, signal);
 }

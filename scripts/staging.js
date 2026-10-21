@@ -15,14 +15,15 @@
  *   node scripts/staging.js --with-my-data   # 建库时连番单一起复制（配 --reset-db 用）
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, statSync, openSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, statSync, openSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { siteUp } from './site-url.js';
 import { sourceFingerprint } from './source-hash.js';
 import { snapshotSync } from './snapshot.js';
-import { IS_WIN, VITE_BIN, killTree, spawnBackgroundWin, processCmdline, pidOnPort } from './platform.js';
+import { IS_WIN, VITE_BIN, killTree, spawnBackgroundWin, processCmdline, pidOnPort, tailscaleIp } from './platform.js';
 import { DATA_DIR } from '../src/lib/server/paths.js';
+import { copyDbSnapshot } from './site.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.STAGING_PORT || '3001';
@@ -87,11 +88,9 @@ if (process.argv.includes('--reset-db')) {
 
 if (!existsSync(DEV_DB)) {
   if (!existsSync(PROD_DB)) { console.error('❌ 找不到正式库'); process.exit(1); }
-  spawnSync(process.execPath, ['-e', `
-    const { DatabaseSync } = require('node:sqlite');
-    new DatabaseSync(${JSON.stringify(PROD_DB)}).exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  `], { stdio: 'ignore' });
-  copyFileSync(PROD_DB, DEV_DB);
+  // 只读连接 + VACUUM INTO（和 npm test、发布自检同一个 copyDbSnapshot）：原来先 checkpoint 再复制文件 ——
+  // checkpoint 本身是对正式库的一次写，正式站同时在写时复制出来的文件还可能是撕裂的（2026-10-21 审核）
+  await copyDbSnapshot(PROD_DB, DEV_DB);
   console.log(`📋 已从正式库复制 dev.db (${(statSync(DEV_DB).size / 1048576).toFixed(0)} MB)`);
 
   if (process.argv.includes('--with-my-data')) {
@@ -144,7 +143,7 @@ if (IS_WIN) {
   child.unref();
 }
 
-const ip = spawnSync('tailscale', ['ip', '-4'], { encoding: 'utf8' }).stdout?.trim().split('\n')[0];
+const ip = tailscaleIp();
 const url = `http://${ip || '127.0.0.1'}:${PORT}`;
 process.stdout.write('▶ 等测试站起来…');
 let up = false;

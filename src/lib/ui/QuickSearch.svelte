@@ -19,7 +19,7 @@
   import { goto, afterNavigate } from '$app/navigation';
   import { fade, scale } from 'svelte/transition';
   import { media } from '$lib/media.svelte.js';
-  import { TYPE_CN, WATCH_STATUS, SEASON_CN } from '$lib/constants.js';
+  import { TYPE_CN, WATCH_STATUS, SEASON_CN, MY_STATUS_TAG } from '$lib/constants.js';
 
   let open = $state(false);
   let q = $state('');
@@ -177,13 +177,6 @@
     .filter(Boolean).join(' · ');
   const mineText = (a) => (a.my_status === 'watching'
     ? `在看 ${a.current_episode ?? 0}/${a.episodes ?? '?'}` : WATCH_STATUS[a.my_status]);
-  const MINE_CLS = {
-    watching: 'bg-accent/15 text-accent-ink',
-    completed: 'bg-live/15 text-live-ink',
-    plan: 'ring-1 ring-inset ring-ink-600 text-ink-200',
-    on_hold: 'bg-ink-800 text-ink-400',
-    dropped: 'bg-ink-800 text-ink-400'
-  };
   /** 搜索词原样出现在标题里时标出来（简繁 / 逐字命中的不标，宁可不标也不标错） */
   function parts(title) {
     const n = shownQ.trim();
@@ -289,7 +282,7 @@
                   <span class="mt-0.5 block truncate text-[12px] text-ink-400">{meta(a)}</span>
                 </span>
                 {#if a.my_status}
-                  <span class="shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium {MINE_CLS[a.my_status] ?? ''}">
+                  <span class="shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium {MY_STATUS_TAG[a.my_status] ?? ''}">
                     {mineText(a)}
                   </span>
                 {/if}

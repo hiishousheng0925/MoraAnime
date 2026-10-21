@@ -12,18 +12,22 @@
   import AccountCard from '$lib/ui/AccountCard.svelte';
   import SignupAllow from '$lib/ui/SignupAllow.svelte';
   import { requireLogin } from '$lib/auth.svelte.js';
+  import { post } from '$lib/api.js';
   let { data } = $props();
   const user = $derived(data.user);
   const admin = $derived(data.user?.role === 'admin');
 
   let busy = $state(false);
 
+  /**
+   * 失败返回 null 并 toast —— 原来裸 fetch 不看结果，存年份出错会弹「只显示 undefined–undefined 年」。
+   * 成功失败都 invalidateAll：失败时开关 / 滑块也要回到库里的真实值。
+   */
   async function api(url, body) {
     busy = true;
-    try {
-      return await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) }).then((r) => r.json());
-    } finally { busy = false; await invalidateAll(); }
+    try { return await post(url, body); }
+    catch (e) { toast.error(e); return null; }
+    finally { busy = false; await invalidateAll(); }
   }
 
   const toggleNsfw = (v) => api('/api/settings', { key: 'hide_nsfw', value: v });
@@ -40,13 +44,13 @@
   const dirty = $derived(yMin !== data.yearWin.min || yMax !== data.yearWin.max);
   async function saveYears() {
     const r = await api('/api/settings', { key: 'year_window', min: yMin, max: yMax });
-    toast.ok(`只显示 ${r.min}–${r.max} 年的内容`);
+    if (r) toast.ok(`只显示 ${r.min}–${r.max} 年的内容`);
   }
   const delFilter = (id) => api('/api/filters', { op: 'del', id });
 
   async function share(op) {
     const r = await api('/api/share', { op });
-    toast.ok(r.token ? '分享链接已更新' : '分享链接已撤销');
+    if (r) toast.ok(r.token ? '分享链接已更新' : '分享链接已撤销');
   }
 
   /** 截图保存位置（观看页右上角的相机）：服务端写盘，所以是这台电脑上的绝对路径 */
@@ -54,7 +58,7 @@
   $effect(() => { shotDir = data.shotDir; });
   async function saveShotDir(v) {
     const r = await api('/api/settings', { key: 'screenshot_dir', value: v });
-    if (r.error) toast.error(r.error); else toast.ok(`截图保存到 ${r.value}`);
+    if (r) toast.ok(`截图保存到 ${r.value}`);
   }
 
   /**
@@ -108,12 +112,12 @@
   <!--
     标题和左侧目录是同一列、一起吸顶（2026-10-21，主人：「设置」两字跟着滚有点怪）。
     原来标题在网格外、只有目录吸顶：一滚，标题走了、目录还钉着，左栏变成一串没头的链接，
-    而它和内容区的上沿也对不齐。现在整列一起停在原位（top = 顶栏 53 + Page 的 py-5 20 = 73px，
+    而它和内容区的上沿也对不齐。现在整列一起停在原位（top = 顶栏 --hdr-h + Page 的 py-5 20px，
     所以开始滚的那一下也不会跳），macOS 系统设置 / GitHub 设置页都是这个结构。
     手机上没有目录，标题照常在内容顶部、随页面滚走（和其他页一致）。
   -->
   <div class="lg:grid lg:grid-cols-[11rem_minmax(0,46rem)] lg:gap-10">
-  <div class="self-start lg:sticky lg:top-[73px] lg:max-h-[calc(100dvh-73px)] lg:overflow-y-auto lg:pb-6">
+  <div class="self-start lg:sticky lg:top-[calc(var(--hdr-h)+20px)] lg:max-h-[calc(100dvh-var(--hdr-h)-20px)] lg:overflow-y-auto lg:pb-6">
     <h1 class="text-xl font-semibold lg:px-3 lg:pt-0.5 lg:text-[22px] lg:leading-7">设置</h1>
     <nav class="mt-5 hidden lg:block" aria-label="设置目录">
       {#each TOC as [g, xs] (g)}

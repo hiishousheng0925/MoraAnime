@@ -15,6 +15,8 @@ import { assertPublic, headersFor } from './scrape.js';
 
 const TTL = 60 * 60_000;
 const MAX_BYTES = 2_000_000;
+/** mp4 中转等响应头的上限：对方站挂住不回时别让连接一直吊着（2026-10-21 审核） */
+const HEAD_MS = 15_000;
 const tokens = new Map();   // token → { url, referer, ua, kind, exp }
 
 function issue(url, referer, ua, kind) {
@@ -44,11 +46,20 @@ export async function streamMp4(token, range) {
   const entry = tokens.get(token);
   if (!entry || entry.kind !== 'mp4' || entry.exp <= Date.now()) return null;
   let u = new URL(entry.url);
+  // 只限「连上 + 等到响应头」这一段（整条重定向链共用）：拿到头就撤掉计时器，
+  // 不能用 AbortSignal.timeout —— 它到点会连正在传的视频流一起掐断，一集 24 分钟的中转不可能 15 秒传完
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(new Error('片源响应超时')), HEAD_MS);
+  try {
+    return await mp4Hops(u, entry, range, ac.signal);
+  } finally { clearTimeout(timer); }
+}
+
+async function mp4Hops(u, entry, range, signal) {
   for (let hop = 0; hop < 5; hop++) {
     await assertPublic(u);
     // 不带 Referer：7sefun 的腾讯 CDN 带了外站来源就 404（和观看页的 no-referrer 同一个原因）
     const { referer: _drop, ...base } = headersFor({ userAgent: entry.ua }, null);
-    const res = await fetch(u, { headers: { ...base, ...(range ? { range } : {}) }, redirect: 'manual' });
+    const res = await fetch(u, { headers: { ...base, ...(range ? { range } : {}) }, redirect: 'manual', signal });
     const loc = res.status >= 300 && res.status < 400 && res.headers.get('location');
     if (loc) { await res.body?.cancel(); u = new URL(loc, u); continue; }
     if (!res.ok) { await res.body?.cancel(); throw new Error(`HTTP ${res.status}`); }

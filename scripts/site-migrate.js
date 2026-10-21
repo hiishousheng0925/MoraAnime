@@ -29,7 +29,7 @@ import * as site from './site.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
-const FROM = resolve(arg('--from', join(ROOT, 'data')));
+const FROM = resolve(arg('--from', join(ROOT, 'data')));   // lint-datapath-ok: 搬家的来源就是旧布局的仓库 data/
 const BUILD = resolve(arg('--build', join(ROOT, 'build')));
 const PORT = envValue('PORT') || '3000';
 const STAGING_PORT = process.env.STAGING_PORT || '3001';

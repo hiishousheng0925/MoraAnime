@@ -30,3 +30,27 @@ export const makeHref = (base, current, opts) => (patch) => buildHref(base, curr
 /** 数组型筛选值的开关 */
 export const toggleIn = (arr, v) =>
   (arr ?? []).includes(v) ? arr.filter((x) => x !== v) : [...(arr ?? []), v];
+
+/**
+ * 把题材 g 放进 target 槽位（'g' 全部包含 / 'any' 任一 / 'ng' 排除），并从其他槽位移除 ——
+ * 同一题材只能在一个槽位。已经在 target 里就是移除。返回 URL patch。
+ * f 是 loader 给的筛选状态（genres / genresAny / genresNot）。目录页和番单页原来各抄一份。
+ */
+export function moveGenre(f, target, g) {
+  const cur = { g: f.genres, any: f.genresAny, ng: f.genresNot };
+  const has = cur[target].includes(g);
+  const out = {};
+  for (const k of ['g', 'any', 'ng']) out[k] = cur[k].filter((x) => x !== g);
+  if (!has) out[target] = [...out[target], g];
+  return { g: out.g, any: out.any, ng: out.ng };
+}
+
+/** 题材胶囊上的摘要：`A+B (C|D) −E,F`，超过 18 字截断；没有题材条件时 null */
+export function genreSummary(f) {
+  const parts = [];
+  if (f.genres.length) parts.push(f.genres.join('+'));
+  if (f.genresAny.length) parts.push(`(${f.genresAny.join('|')})`);
+  if (f.genresNot.length) parts.push(`−${f.genresNot.join(',')}`);
+  const t = parts.join(' ');
+  return t ? (t.length > 18 ? t.slice(0, 17) + '…' : t) : null;
+}

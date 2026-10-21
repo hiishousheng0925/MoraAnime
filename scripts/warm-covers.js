@@ -34,7 +34,8 @@ console.log(`🖼  预热 ${rows.length} 张封面（经 ${BASE}/cover/…，命
 let ok = 0, dead = 0;
 for (let i = 0; i < rows.length; i++) {
   try {
-    const r = await fetch(`${BASE}/cover/${rows[i].id}`);
+    // 单张限 30 秒：对方图床卡住时原来会一直等，拖住整轮同步（2026-10-21 审核）
+    const r = await fetch(`${BASE}/cover/${rows[i].id}`, { signal: AbortSignal.timeout(30_000) });
     r.ok ? ok++ : dead++;
   } catch { dead++; }
   if ((i + 1) % 25 === 0) process.stdout.write(`\r   ${i + 1}/${rows.length}  成功 ${ok} 死链 ${dead}   `);

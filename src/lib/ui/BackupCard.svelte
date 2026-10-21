@@ -38,7 +38,9 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payload, replace: replaceMode }) }).then((x) => x.json());
       if (r.error) { toast.error(r.error); return; }
-      toast.ok(`已恢复 ${r.entries} 条番单 · ${r.triage} 条标记` +
+      // 整站备份里认不出当前账号（用户名、id 都对不上）：原来静默恢复 0 条
+      if (r.missingAccount && !r.entries && !r.triage) toast.error('备份里没有这个账号的记录');
+      else toast.ok(`已恢复 ${r.entries} 条番单 · ${r.triage} 条标记` +
                (r.unresolved?.length ? ` · ${r.unresolved.length} 条未匹配` : '') +
                (r.safety ? ` · 原记录已备份为 ${r.safety.split(/[\\/]/).pop()}` : ''));
       await invalidateAll();

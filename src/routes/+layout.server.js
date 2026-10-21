@@ -1,4 +1,5 @@
-import { myStats, triageStats, getSetting } from '$lib/server/queries.js';
+import { myStats, triageStats } from '$lib/server/queries.js';
+import { hideNsfw } from '$lib/server/loaderUtil.js';
 import { getDb } from '$lib/server/db.js';
 import { memoByDb } from '$lib/server/memo.js';
 import { DRAWER_COOKIE } from '$lib/constants.js';
@@ -50,5 +51,5 @@ export function load({ url, cookies, depends, locals }) {
     `SELECT id FROM anime WHERE is_stub = 0 AND is_nsfw = 0 AND cover_dead = 0 AND cover_local_path IS NOT NULL
      ORDER BY bgm_collection DESC LIMIT 24`).all().map((r) => r.id));
   return { env: ENV, brand: BRAND, desktop: DESKTOP, bare: false, drawerOpen, user, stats: user ? myStats() : {}, triage: user ? triageStats() : {}, gateCovers,
-           hideNsfw: getSetting('hide_nsfw', '0') === '1' };
+           hideNsfw: hideNsfw() };
 }

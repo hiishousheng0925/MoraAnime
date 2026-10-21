@@ -13,8 +13,11 @@ const MEDIA = /https?:(?:\\?\/){2}[^"'\s<>\\]+?(?:\\?\.)(?:m3u8|mp4)(?:\?[^"'\s<
 
 const clean = (u) => u.replace(/\\\//g, '/').replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
 
-/** 片头广告 / 占位视频：文件名带这些词的不要（AGE 的页面里就挂着一个 adposter.mp4） */
-const AD = /(?:^|[/_.-])(?:ads?|adposter|advert|preroll|loading|logo)(?:[/_.-]|\d|$)/i;
+/**
+ * 片头广告 / 占位视频：文件名带这些词的不要（AGE 的页面里就挂着一个 adposter.mp4）。
+ * sniff.js 也用这一份（原来各抄一份，2026-10-21 审核）
+ */
+export const AD = /(?:^|[/_.-])(?:ads?|adposter|advert|preroll|loading|logo)(?:[/_.-]|\d|$)/i;
 const isMedia = (u) => /\.(?:m3u8|mp4)(?:\?|$)/i.test(u) && !AD.test(new URL(u).pathname);
 
 /** 苹果 CMS 的 encrypt：0 明文；1 escape()；2 base64 后再 escape()；3 先 base64 再逐字符偏移（不支持） */
@@ -55,9 +58,10 @@ const fromQuery = (src) => {
 /**
  * @returns {Promise<{url:string,referer:string}|null>} referer：拉流时要带的来源，
  *   很多 CDN 校验它，不带就 403
+ * signal：限时到了 / 浏览器走了就停（原来 budget 到点后这条链还在后台把两层 iframe 抓完，2026-10-21 审核）
  */
-export async function resolvePlay(rule, playUrl, depth = 0) {
-  const { text, url } = await fetchText(playUrl, rule);
+export async function resolvePlay(rule, playUrl, { depth = 0, signal } = {}) {
+  const { text, url } = await fetchText(playUrl, rule, undefined, signal);
   const hit = direct(text);
   if (hit.url) return { url: hit.url, referer: url };
   if (depth >= 2) return null;
@@ -69,9 +73,9 @@ export async function resolvePlay(rule, playUrl, depth = 0) {
     const q = fromQuery(f);
     if (q) return { url: q, referer: f };
     try {
-      const r = await resolvePlay(rule, f, depth + 1);
+      const r = await resolvePlay(rule, f, { depth: depth + 1, signal });
       if (r) return r;
-    } catch { /* 这一层不通就试下一个 iframe */ }
+    } catch { if (signal?.aborted) return null; /* 这一层不通就试下一个 iframe；被取消了就别再试 */ }
   }
   return null;
 }

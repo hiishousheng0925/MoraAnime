@@ -17,6 +17,10 @@
   import { GENRE_NAMES } from '$lib/genres.js';
   import { TYPE_CN, MINE_TABS, SORT_OPTS, DEFAULT_SORT, SEASON_CN, YEAR_FLOOR } from '$lib/constants.js';
   import { makeSetter, makeHref } from '$lib/urlState.js';
+  import { moveGenre as moveIn, genreSummary } from '$lib/urlBuild.js';
+  import ActiveChips from '$lib/ui/ActiveChips.svelte';
+  import { CTA } from '$lib/ui/btn.js';
+  import { centerCurrent } from '$lib/centerCurrent.js';
   import { page as pg } from '$app/state';
   import Page from '$lib/ui/Page.svelte';
   import ResetButton from '$lib/ui/ResetButton.svelte';
@@ -24,21 +28,14 @@
   import SearchBox from '$lib/ui/SearchBox.svelte';
   import Toggle from '$lib/ui/Toggle.svelte';
   import GenrePicker from '$lib/ui/GenrePicker.svelte';
+  import LoginGate from '$lib/ui/LoginGate.svelte';
   let { data } = $props();
-
 
   const f = $derived(data.f);
   const set = $derived(makeSetter('/mine', pg.url.searchParams));
   const to = $derived(makeHref('/mine', pg.url.searchParams));
 
-  function moveGenre(target, g) {
-    const cur = { g: f.genres, any: f.genresAny, ng: f.genresNot };
-    const has = cur[target].includes(g);
-    const out = {};
-    for (const k of ['g', 'any', 'ng']) out[k] = cur[k].filter((x) => x !== g);
-    if (!has) out[target] = [...out[target], g];
-    return { g: out.g, any: out.any, ng: out.ng };
-  }
+  const moveGenre = (target, g) => moveIn(f, target, g);
 
   // 题材计数由 loader 按番剧去重算好（前端原来用「各标签取 max」，
   // 跨标签的番会被漏掉 —— 和统计页那个偏低 32% 的 bug 同一个成因）。
@@ -50,14 +47,7 @@
 
   const sum = $derived({
     type: f.typesAreDefault ? null : (f.types ?? []).map((t) => TYPE_CN[t] ?? t).join('·'),
-    genre: (() => {
-      const p = [];
-      if (f.genres.length) p.push(f.genres.join('+'));
-      if (f.genresAny.length) p.push(`(${f.genresAny.join('|')})`);
-      if (f.genresNot.length) p.push(`−${f.genresNot.join(',')}`);
-      const t = p.join(' ');
-      return t ? (t.length > 18 ? t.slice(0, 17) + '…' : t) : null;
-    })(),
+    genre: genreSummary(f),
     time: f.season ? `${f.yearMin ?? ''}${SEASON_CN[f.season]}`
         : f.yearMin && f.yearMin === f.yearMax ? String(f.yearMin)
         : f.yearMin ? `${f.yearMin}–${f.yearMax ?? '今'}` : null,
@@ -86,7 +76,6 @@
     ...(f.isShort === 1 ? [{ k: 'sh', text: '泡面番', off: () => set({ short: null }) }] : [])
   ]);
   const base = $derived(`/mine?status=${data.status}`);
-  import LoginGate from '$lib/ui/LoginGate.svelte';
 
   /** 单一状态的页签里，卡片上的状态徽标全是同一个字，去掉 */
   const single = $derived(data.status !== 'active');
@@ -103,15 +92,6 @@
    */
   let searchOpen = $state(false);
   $effect(() => { searchOpen = !!data.f.q; });
-
-  /** 手机上页签一行横滑：当前页签不在可视范围（比如「弃番」）时滚到中间 */
-  let tabNav = $state(null);
-  $effect(() => {
-    data.status;
-    const el = tabNav?.querySelector('[aria-current="page"]');
-    if (el && tabNav.scrollWidth > tabNav.clientWidth)
-      tabNav.scrollLeft = el.offsetLeft - (tabNav.clientWidth - el.offsetWidth) / 2;
-  });
 </script>
 
 <Page fill>
@@ -121,7 +101,8 @@
   <MineHero hero={data.hero} stats={data.stats} name={data.user.username} />
 
   <!-- 下划线页签：一行横滑，计数是小胶囊，0 的整格弱化 -->
-  <nav bind:this={tabNav} class="no-scrollbar -mx-4 mt-3 flex overflow-x-auto border-b border-ink-700 px-2 sm:mx-0 sm:mt-4 sm:px-0"
+  <!-- 手机上一行横滑：当前页签（比如「弃番」）不在可视范围时滚到中间 -->
+  <nav use:centerCurrent={data.status} class="no-scrollbar -mx-4 mt-3 flex overflow-x-auto border-b border-ink-700 px-2 sm:mx-0 sm:mt-4 sm:px-0"
        aria-label="番单分类">
     {#each MINE_TABS as [v, l]}
       {@const n = data.stats[v] ?? 0}
@@ -217,17 +198,7 @@
       </div>
     {/if}
 
-    {#if chips.length}
-      <div class="mt-2 flex flex-wrap items-center gap-1.5">
-        {#each chips as c (c.k)}
-          <button onclick={c.off}
-                  class="rounded-full border bg-ink-900 px-2.5 py-1 text-[12px]
-                         {c.tone === 'danger' ? 'border-danger/40 text-danger' : 'border-accent/40 text-accent'}">
-            {c.text} ✕
-          </button>
-        {/each}
-      </div>
-    {/if}
+    <ActiveChips {chips} muted={data.filtersMuted} />
 
   {#if showShelf}
     <Section title="继续看" count={data.shelf.length}>
@@ -260,7 +231,7 @@
              「想看」是去目录挑；在看 / 搁置 / 弃番空着是正常状态，不硬塞一个按钮 -->
         <EmptyState bare icon={Books} title={EMPTY_TITLE[data.status] ?? '此分类暂无内容'}>
           {#if EMPTY_EXIT[data.status]}
-            <a href={EMPTY_EXIT[data.status][0]} class="tap inline-flex items-center rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:brightness-110 active:scale-95">
+            <a href={EMPTY_EXIT[data.status][0]} class={CTA}>
               {EMPTY_EXIT[data.status][1]}
             </a>
           {/if}

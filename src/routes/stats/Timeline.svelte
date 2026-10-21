@@ -1,6 +1,6 @@
 <script>
   /**
-   * 观看时间线：左侧一根竖线 + 每行一个圆点；日期是吸顶的小标题（顶栏 53px 下面）。
+   * 观看时间线：左侧一根竖线 + 每行一个圆点；日期是吸顶的小标题（顶栏 --hdr-h 下面）。
    * 同一天同一部番合并成一行（timeline.js 的 mergeDay），原来逐条一张带边框的卡片。
    * 分页沿用原逻辑（按日志条数分页，?tl=）。
    */
@@ -24,7 +24,7 @@
     <div class="mt-2">
       {#each rows as d (d.date)}
         <div class="relative">
-          <div class="sticky top-[53px] z-[1] -mx-1 flex items-baseline gap-2 bg-ink-900 px-1 pb-1.5 pt-3">
+          <div class="sticky top-[var(--hdr-h)] z-[1] -mx-1 flex items-baseline gap-2 bg-ink-900 px-1 pb-1.5 pt-3">
             <span class="text-[13px] font-semibold text-ink-100">{d.label.head}</span>
             <span class="text-[12px] text-ink-400">{d.label.rel}</span>
           </div>

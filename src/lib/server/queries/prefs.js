@@ -20,6 +20,13 @@ export function getSetting(key, dflt = null) {
   const r = getDb().prepare('SELECT value FROM setting WHERE key=?').get(key);
   return r ? r.value : dflt;
 }
+/**
+ * 「隐藏 NSFW」开着没有。全站唯一的判断写法（2026-10-21 审核：原来 getSetting('hide_nsfw', '0') === '1'
+ * 在 queries 和 loader 里手写了七处）。放在这里而不是 loaderUtil：queries/ 下的模块也要用，
+ * 而 loaderUtil 反过来 import queries.js，放那边会成环
+ */
+export const hideNsfw = () => getSetting('hide_nsfw', '0') === '1';
+
 export function setSetting(key, value) {
   if (isUserSettingKey(key)) {
     const uid = currentUid();

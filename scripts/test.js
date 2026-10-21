@@ -11,12 +11,12 @@
  * 不 checkpoint、不写主库（原来复制前会对主库跑 wal_checkpoint，那也是一次写）。
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { existsSync, rmSync, mkdtempSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { VITE_BIN } from './platform.js';
+import { VITE_BIN, killTree } from './platform.js';
 import { DATA_DIR } from '../src/lib/server/paths.js';
 import { copyDbSnapshot } from './site.js';
 
@@ -34,9 +34,16 @@ const BUILD_DIR = bi >= 0 ? argv[bi + 1] : null;
 const SUITE = (() => {
   // ⚠️ bi 为 -1（没给 --build）时不能拿它去过滤 —— i !== bi + 1 会变成 i !== 0，
   // 把第一个参数（套件名）吃掉，于是 `test.js stats-audit` 静默跑成 e2e
-  const rest = bi >= 0 ? argv.filter((a, i) => i !== bi && i !== bi + 1) : argv;
+  // 其它 --开关（--no-unit、--server-log）也不能当套件名
+  const rest = (bi >= 0 ? argv.filter((a, i) => i !== bi && i !== bi + 1) : argv).filter((a) => !a.startsWith('--'));
   return rest[0] ? `tests/${rest[0].replace(/\.js$/, '')}.js` : 'tests/e2e.js';
 })();
+// 先清掉以前没删成的副本（每个 ~230MB；2026-10-21 实测攒了 307 个 / 68GB）。只动 6 小时前的，不碰正在并行跑的测试
+for (const n of readdirSync(tmpdir())) {
+  if (!n.startsWith('j-anime-test-')) continue;
+  const p = join(tmpdir(), n);
+  try { const st = statSync(p); if (st.isDirectory() && Date.now() - st.mtimeMs > 6 * 3600_000) rmSync(p, { recursive: true, force: true }); } catch {}
+}
 const tmp = mkdtempSync(join(tmpdir(), 'j-anime-test-'));
 const TEST_DB = join(tmp, 'test.db');
 const COPY_TOKEN = randomBytes(12).toString('hex');
@@ -137,9 +144,18 @@ const onOut = (b) => {
 server.stdout.on('data', onOut);
 server.stderr.on('data', onOut);
 
+// Windows 上 kill() 发完信号就返回，服务进程还开着 test.db，紧接着 rmSync 删不掉、错误又被吞 →
+// 每跑一次留一个副本。所以按 PID 杀树（taskkill 同步等它结束），再给句柄释放留几次重试
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+let cleaned = false;
 const cleanup = () => {
-  try { server.kill('SIGTERM'); } catch {}
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  if (cleaned) return; cleaned = true;
+  try { killTree(server.pid); } catch {}
+  for (let i = 0; i < 10; i++) {
+    try { rmSync(tmp, { recursive: true, force: true }); if (!existsSync(tmp)) break; } catch {}
+    sleepSync(500);
+  }
+  if (existsSync(tmp)) console.error(`⚠️ 临时副本没删掉：${tmp}`);
 };
 process.on('exit', cleanup);
 process.on('SIGINT', () => { cleanup(); process.exit(130); });
@@ -162,5 +178,5 @@ const r = spawnSync(process.execPath, [join(ROOT, SUITE)],
     stdio: 'inherit' });
 
 cleanup();
-console.log('\n🧹 已删除临时副本，主库未被触碰');
+if (!existsSync(tmp)) console.log('\n🧹 已删除临时副本，主库未被触碰');
 process.exit(r.status ?? 1);

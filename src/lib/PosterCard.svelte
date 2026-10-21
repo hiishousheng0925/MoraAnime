@@ -36,7 +36,7 @@
     <Cover {a} {eager} cls="aspect-2/3" />
     <div class="pointer-events-none absolute left-1.5 top-1.5 flex gap-1">
       {#if a.type !== 'TV'}<span class="rounded-md bg-black/70 px-1.5 py-0.5 text-[10.5px] text-white/90 backdrop-blur-sm">{TYPE_CN[a.type] ?? a.type}</span>{/if}
-      {#if a.is_short}<span class="rounded-md bg-amber-950/70 px-1.5 py-0.5 text-[10.5px] text-white">泡面</span>{/if}
+      {#if a.is_short}<span class="rounded-md bg-short-badge/70 px-1.5 py-0.5 text-[10.5px] text-white">泡面</span>{/if}
     </div>
     {#if st === 'ONGOING'}
       <span class="pointer-events-none absolute right-2 top-2 size-2 rounded-full bg-live

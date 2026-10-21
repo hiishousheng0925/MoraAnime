@@ -715,7 +715,7 @@ console.log('\n━━━ 12b. 备份 v2：观看站 / 手排顺序 / 手动关�
 {
   const { setEntry, moveInSeries, linkAnime } = await import('../src/lib/server/queries.js');
   const { pruneBackups, saveBackup } = await import('../src/lib/server/backup.js');
-  const { existsSync, readdirSync, writeFileSync, mkdtempSync } = await import('node:fs');
+  const { existsSync, readdirSync, writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
 
@@ -764,6 +764,7 @@ console.log('\n━━━ 12b. 备份 v2：观看站 / 手排顺序 / 手动关�
   ok(readdirSync(dir).includes('someone-else.json'), '目录里别人的 json 没被删');
   ok(readdirSync(dir).includes('j-anime-2026-01-03T00-00-00.json'), '留下的是最新那份');
   ok(/j-anime-.*-before-import\.json$/.test(saveBackup(dir, dump, 'before-import')), '带标签的备份文件名');
+  rmSync(dir, { recursive: true, force: true });   // 原来不删，每跑一次 e2e 在 %TEMP% 留一个（攒了 155 个）
 
   db.exec(`DELETE FROM user_entry; DELETE FROM manual_relation; DELETE FROM watch_site;
            UPDATE franchise_member SET user_order=NULL; DELETE FROM setting WHERE key='test_key';`);

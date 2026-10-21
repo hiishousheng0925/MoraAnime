@@ -37,9 +37,15 @@ console.log('\n━━━ 1. SvelteKit 只允许固定的导出名 ━━━');
   const bad = [];
   for (const f of JS.filter((x) => /\+(page|layout)\.server\.js$|\+(page|layout)\.js$/.test(x))) {
     for (const m of readFileSync(f, 'utf8')
-      .matchAll(/^export\s+(?:async\s+)?(?:function|const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) {
+      .matchAll(/^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)) {
       if (!ALLOWED.includes(m[1]) && !m[1].startsWith('_')) bad.push(`${f}: export ${m[1]}`);
     }
+    // export { a, b as c } 这种写法原来查不到：按导出后的名字算
+    for (const m of readFileSync(f, 'utf8').matchAll(/^export\s*\{([^}]*)\}/gm))
+      for (const part of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+        const n = part.split(/\s+as\s+/).pop().trim();
+        if (!ALLOWED.includes(n) && !n.startsWith('_')) bad.push(`${f}: export { ${n} }`);
+      }
   }
   ok(bad.length === 0, '路由文件没有非法导出', bad.join('\n     '));
 }
@@ -54,6 +60,13 @@ console.log('\n━━━ 2. 没有死组件 ━━━');
   ok(dead.length === 0, '每个组件都有人引用', dead.join(', '));
 }
 
+/** 去掉注释后的源码（粗略：块注释 + 行首 / 空白后的 // 注释）。只在注释里提到的名字不算有人用 */
+const codeCache = new Map();
+const codeOf = (p) => {
+  if (!codeCache.has(p)) codeCache.set(p, readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1'));
+  return codeCache.get(p);
+};
+
 console.log('\n━━━ 3. 没有死导出 ━━━');
 {
   // 门面文件（只有 export * 的）不算；只在自身文件内用到也算死导出
@@ -61,10 +74,10 @@ console.log('\n━━━ 3. 没有死导出 ━━━');
   for (const f of JS.filter((x) => x.startsWith('src/lib/'))) {
     const src = readFileSync(f, 'utf8');
     if (/^export \*/m.test(src)) continue;
-    for (const m of src.matchAll(/^export\s+(?:function|const|let)\s+([A-Za-z_$][\w$]*)/gm)) {
+    for (const m of src.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) {
       const n = m[1];
       const usedElsewhere = ALL.concat(walk('scripts'), walk('tests'))
-        .some((o) => o !== f && new RegExp(`\\b${n}\\b`).test(readFileSync(o, 'utf8')));
+        .some((o) => o !== f && new RegExp(`\\b${n}\\b`).test(codeOf(o)));
       const usedHere = (src.match(new RegExp(`\\b${n}\\b`, 'g')) || []).length > 1;
       if (!usedElsewhere && !usedHere) bad.push(`${f}: ${n}`);
     }
@@ -91,14 +104,25 @@ console.log('\n━━━ 5. 不靠相对路径推算【数据】目录 ━━━
   // db.js 用它读随源码走的 schema.sql，那是代码资源，合法。
   // 真正的坑是拿它推算 data/ covers/ backups/ *.db —— 生产构建后会指错，
   // 而 node:sqlite 打不开还会静默新建空库，站点起来但一条番都没有。
+  // 原来只逐行看 src：「先 const ROOT = …import.meta.url，下一行 join(ROOT, 'data')」查不出来，scripts/ 也不扫
+  const DATAISH = /['"`](?:data|covers|backups|cache)(?:['"`/\\]|$)|\.db['"`]/;
   const bad = [];
-  for (const f of JS.filter((x) => x !== 'src/lib/server/paths.js')) {
+  for (const f of JS.concat(walk('scripts').filter((x) => x.endsWith('.js'))).filter((x) => x !== 'src/lib/server/paths.js')) {
     const src = readFileSync(f, 'utf8');
     if (!/import\.meta\.url/.test(src)) continue;
+    const vars = new Set();
     for (const line of src.split('\n')) {
       if (!/import\.meta\.url/.test(line)) continue;
       if (/data|covers|backups|\.db|cache/i.test(line)) bad.push(`${f}: ${line.trim()}`);
+      const v = line.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/);
+      if (v) vars.add(v[1]);
     }
+    // 确实就是要仓库里的 data/（比如搬家脚本的来源）：同一行写 lint-datapath-ok: 原因
+    for (const v of vars)
+      for (const line of src.split('\n'))
+        if (!line.includes('lint-datapath-ok') && DATAISH.test(line)
+            && new RegExp(`(?:join|resolve)\\(\\s*${v}\\b`).test(line))
+          bad.push(`${f}: ${line.trim()}`);
   }
   ok(bad.length === 0, '没有从 import.meta.url 推算数据路径的地方', bad.join('\n     '));
 }
@@ -246,6 +270,23 @@ console.log('\n━━━ 12. 内容区宽度只有一处定义 ━━━');
   ok((shell.match(/max-w-7xl/g) || []).length === 1, 'Page.svelte 里只有一个外框宽度');
 }
 
+console.log('\n━━━ 13. 构建缺省不能写进正式站目录 ━━━');
+{
+  // 实测事故：裸跑 `npx vite build` 把正式站在跑的 build/ 整个重写，进程的模块图
+  // 对不上，每个请求 500。发布门禁只管 npm run release，管不住手动构建。
+  const cfg = readFileSync('svelte.config.js', 'utf8');
+  const m = cfg.match(/BUILD_OUT\s*\|\|\s*'([^']+)'/);
+  ok(!!m, 'svelte.config.js 里能读到缺省输出目录');
+  ok(m && m[1] !== 'build', `缺省输出不是 build/（现在是 ${m?.[1]}）`, m?.[1]);
+  // 桌面客户端仓库（MoraAnime）同步时排除了网站的发布脚本
+  if (existsSync('scripts/release.js'))
+    ok(/BUILD_OUT: 'build.next'/.test(readFileSync('scripts/release.js', 'utf8')),
+       '发布走 build.next 再原子替换');
+  else console.log('  ⏭️  跳过「发布走 build.next」：没有 scripts/release.js');
+  ok(/BUILD_OUT: 'build.staging'/.test(readFileSync('scripts/staging.js', 'utf8')),
+     '测试站走 build.staging');
+}
+
 console.log('\n━━━ 14. 局部变量不能和 rune 同名 ━━━');
 {
   /**
@@ -265,23 +306,6 @@ console.log('\n━━━ 14. 局部变量不能和 rune 同名 ━━━');
     }
   }
   ok(bad.length === 0, '没有局部变量叫 state / derived / effect / props …', bad.join(', '));
-}
-
-console.log('\n━━━ 13. 构建缺省不能写进正式站目录 ━━━');
-{
-  // 实测事故：裸跑 `npx vite build` 把正式站在跑的 build/ 整个重写，进程的模块图
-  // 对不上，每个请求 500。发布门禁只管 npm run release，管不住手动构建。
-  const cfg = readFileSync('svelte.config.js', 'utf8');
-  const m = cfg.match(/BUILD_OUT\s*\|\|\s*'([^']+)'/);
-  ok(!!m, 'svelte.config.js 里能读到缺省输出目录');
-  ok(m && m[1] !== 'build', `缺省输出不是 build/（现在是 ${m?.[1]}）`, m?.[1]);
-  // 桌面客户端仓库（MoraAnime）同步时排除了网站的发布脚本
-  if (existsSync('scripts/release.js'))
-    ok(/BUILD_OUT: 'build.next'/.test(readFileSync('scripts/release.js', 'utf8')),
-       '发布走 build.next 再原子替换');
-  else console.log('  ⏭️  跳过「发布走 build.next」：没有 scripts/release.js');
-  ok(/BUILD_OUT: 'build.staging'/.test(readFileSync('scripts/staging.js', 'utf8')),
-     '测试站走 build.staging');
 }
 
 console.log('\n━━━ 15. 界面文案不用「bgm」这个缩写 ━━━');

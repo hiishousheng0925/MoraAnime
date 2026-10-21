@@ -15,6 +15,15 @@
  */
 import { getDb } from './db.js';
 
+/** IN (...) 分块查再拼起来：SQLite 单条语句的参数个数有上限（老版本缺省 999），番单再长也不撞上 */
+const CHUNK = 500;
+const qs = (a) => a.map(() => '?').join(',');
+function inChunks(arr, fn) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += CHUNK) out.push(...fn(arr.slice(i, i + CHUNK)));
+  return out;
+}
+
 /** 东京时间的今天，YYYY-MM-DD */
 export const tokyoToday = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 /** YYYY-MM-DD 加减天数 */
@@ -62,14 +71,25 @@ export function episodeStatus(ids, today = tokyoToday()) {
   const out = new Map();
   if (!ids.length) return out;
   const db = getDb();
-  const cards = db.prepare(`SELECT a.id, a.episodes, a.bgm_id, coalesce(a.status_eff, a.status) AS st,
+  const cards = inChunks(ids, (part) => db.prepare(`SELECT a.id, a.episodes, a.bgm_id, coalesce(a.status_eff, a.status) AS st,
       (SELECT count(*) FROM anime b WHERE b.bgm_id = a.bgm_id AND b.is_stub = 0) AS shared
-    FROM anime a WHERE a.id IN (${ids.map(() => '?').join(',')}) AND a.bgm_id IS NOT NULL`).all(...ids);
-  const eps = db.prepare(`SELECT row_number() OVER (ORDER BY sort, id) AS n, name, name_cn, airdate
-    FROM bgm_episode WHERE subject_id = ? ORDER BY sort, id`);
+    FROM anime a WHERE a.id IN (${qs(part)}) AND a.bgm_id IS NOT NULL`).all(...part));
+  /**
+   * 分集一次查出、按条目分组（2026-10-21 审核：原来每部番单独查一次 bgm_episode，番单几百部就是几百次查询）。
+   * 第几集 n 按条目分区编号，排序和原来单条目查询的 ORDER BY sort, id 一致
+   */
+  const bySubject = new Map();
+  const subjects = [...new Set(cards.map((c) => c.bgm_id))];
+  for (const e of inChunks(subjects, (part) => db.prepare(`SELECT subject_id,
+      row_number() OVER (PARTITION BY subject_id ORDER BY sort, id) AS n, name, name_cn, airdate
+    FROM bgm_episode WHERE subject_id IN (${qs(part)}) ORDER BY subject_id, sort, id`).all(...part))) {
+    let l = bySubject.get(e.subject_id);
+    if (!l) bySubject.set(e.subject_id, (l = []));
+    l.push({ n: e.n, name: e.name, name_cn: e.name_cn, airdate: e.airdate });
+  }
   const until = addDays(today, AIRED_AHEAD);
   for (const c of cards) {
-    const list = eps.all(c.bgm_id);
+    const list = bySubject.get(c.bgm_id) ?? [];
     if (!list.length) continue;
     const own = c.episodes > 0 ? c.episodes : null;
     const total = c.shared > 1 ? own : Math.max(own ?? 0, list.length);
@@ -102,9 +122,11 @@ export function airedForMine(today = tokyoToday()) {
   return episodeStatus(ids, today);
 }
 
-/** 今天更新：我在看 / 想看的番里，今天（东京时间）播出新一集的 */
-export function todayUpdates() {
-  const aired = airedForMine();
+/**
+ * 今天更新：我在看 / 想看的番里，今天（东京时间）播出新一集的。
+ * aired 传首页已算好的 airedForMine() 结果，同一个请求里不再算第二遍（2026-10-21 审核）
+ */
+export function todayUpdates(aired = airedForMine()) {
   const ids = [...aired].filter(([, v]) => v.todayEp).map(([id]) => id);
   if (!ids.length) return [];
   const rows = getDb().prepare(`

@@ -2,8 +2,13 @@ import { watching, triageStats, myStats, recommend, recentlySeen } from '$lib/se
 import { getDb } from '$lib/server/db.js';
 import { todayUpdates, airedForMine } from '$lib/server/episodes.js';
 
-export function load({ locals }) {
-  const stats = myStats();
+export async function load({ locals, parent }) {
+  /**
+   * 统计和快速标记进度：登录了直接拿根布局算好的（2026-10-21 审核：原来首页又各算一遍，
+   * triageStats 那几个 count 每次 ~10ms）。访客布局给的是 {}，这里照旧自己算 —— 保持原来的返回值不变
+   * （访客视图是空的，stats 全 0；triage 的 pool / remaining 不因人而异）
+   */
+  const { stats, triage } = locals.user ? await parent() : { stats: myStats(), triage: triageStats() };
   /**
    * 「未看 N 集」按【已播出】的集数算（#47）：原来拿总集数减进度，在播的番把还没播的也算成没看
    * （第 3 集刚播完就显示「未看 9 集」）。没有分集数据的番照旧用总集数。
@@ -22,12 +27,13 @@ export function load({ locals }) {
   return {
     libraryTotal,
     watching: mine,
-    // 今天更新（#47）：在看 / 想看的番里今天（东京时间）播出新一集的
-    today: locals.user ? todayUpdates() : [],
+    // 今天更新（#47）：在看 / 想看的番里今天（东京时间）播出新一集的。
+    // 传入上面已算好的 aired，不让 todayUpdates 再把整份番单的分集查一遍（2026-10-21 审核）
+    today: locals.user ? todayUpdates(aired) : [],
     // 16 = 一排 8 张 × 2 排（原来是 12，第二排会缺两个）；多取 1 条：第一部上首屏 hero 时网格从第二部起
     recommend: recommend(17),      // 保证任何状态下都不为空
     recentlySeen: recentlySeen(16),
     stats,
-    triage: triageStats()
+    triage
   };
 }

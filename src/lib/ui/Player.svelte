@@ -30,6 +30,7 @@
   import { untrack } from 'svelte';
   import { media } from '$lib/media.svelte.js';
   import { srSupported, startSuperRes } from './superres.js';
+  import { store, fmt } from './playerUtil.js';
 
   /** srSrc：开超分时换用的同源地址（直连 mp4 跨站读不了画面）；不给就用 src */
   /**
@@ -44,10 +45,6 @@
         hasPrev = false, hasNext = false, onprev, onnext, onprogress, onfail, onmeta, pending } = $props();
 
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-  const store = {
-    get: (k, d) => { try { const v = localStorage.getItem(`j-anime.player.${k}`); return v == null ? d : JSON.parse(v); } catch { return d; } },
-    set: (k, v) => { try { localStorage.setItem(`j-anime.player.${k}`, JSON.stringify(v)); } catch { /* 隐私模式 */ } }
-  };
 
   let box = $state(), video = $state();
   let paused = $state(true), time = $state(0), dur = $state(0), buffered = $state(0), waiting = $state(false);
@@ -56,7 +53,9 @@
   /** 打开的菜单：'speed' | 'sr'（桌面各挂在自己的按钮上）| 'more'（手机的「⋯」，倍速 / 超分也从这里进） */
   let menu = $state(null);
   let countdown = $state(0);
-  let hideTimer, cdTimer;
+  let hideTimer, cdTimer, tapTimer = null;
+  // 卸载时三个计时器一起清（2026-10-21 审核）：倒计时中离开观看页，1 秒后照样调 onnext，去解析下一集
+  $effect(() => () => { clearTimeout(hideTimer); clearInterval(cdTimer); clearTimeout(tapTimer); });
   const bare = $derived(!(shown || paused));
 
   /**
@@ -71,12 +70,6 @@
   const playSrc = $derived(srOn && srSrc ? srSrc : src);
   const setSr = (v) => { sr = v; srErr = ''; menu = null; store.set('sr', v); };
   const srName = $derived(SR_OPTS.find(([k]) => k === sr)?.[1]);
-
-  const fmt = (s) => {
-    if (!Number.isFinite(s)) return '0:00';
-    s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
-    return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + `:${String(x).padStart(2, '0')}`;
-  };
 
   // 换源：挂 hls.js 或直接给 src。先存下元素：换集时 <video> 先被卸载，bind:this 变 null
   // 同一集里切超分会换地址（直连 mp4 ↔ 中转），记下进度，换完接着播
@@ -148,7 +141,6 @@
    *   触屏：单击显隐控制条；双击左 / 右三分之一 ±10 秒，中间双击全屏
    * 开着菜单时点画面只关菜单
    */
-  let tapTimer = null;
   function onTap(e) {
     if (menu) { menu = null; poke(); return; }
     const r = box.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, touch = e.pointerType !== 'mouse';
@@ -174,9 +166,9 @@
     // 全屏时跟着屏幕走；封顶 4K —— 再大显卡白算，屏幕也显示不出来
     const tw = Math.min(3840, Math.max(dw * dpr, v.videoWidth));
     c.width = Math.round(tw); c.height = Math.round(tw / ar);
-    let stop = null, dead = false;
-    startSuperRes(v, c, mode).then((s) => { if (dead) s(); else stop = s; })
-      .catch((e) => { console.warn('[超分] 启动失败', e); srErr = String(e?.message ?? e); });
+    // 启动失败、播放中途出错（某一帧异常 / 显卡设备丢失）都记进 srErr：srOn 随之为假，<video> 露出来接着放原画
+    let stop = null, dead = false, fail = (e) => { if (!dead) { console.warn('[超分] 出错', e); srErr = String(e?.message ?? e); } };
+    startSuperRes(v, c, mode, fail).then((s) => { if (dead) s(); else stop = s; }).catch(fail);
     return () => { dead = true; stop?.(); };
   });
 

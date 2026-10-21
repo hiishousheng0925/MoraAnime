@@ -13,7 +13,7 @@
 import { GENRE_NAMES } from '../genres.js';
 import { PER_OPTS } from '../perOpts.js';
 
-import { getSetting, facets, yearWindow } from './queries.js';
+import { facets, yearWindow } from './queries.js';
 
 /** 空字符串和缺失都当没填；"0" 也当没填（筛选里 0 无意义） */
 export const num = (v) => (v ? +v : null);
@@ -23,7 +23,8 @@ export const num = (v) => (v ? +v : null);
  */
 export const pickQ = (s) => { const q = (s.get('q') ?? '').trim(); return /[\p{L}\p{N}]/u.test(q) ? q : null; };
 
-export const hideNsfw = () => getSetting('hide_nsfw', '0') === '1';
+// 定义在 queries/prefs.js（queries 自己也要用），这里转出，loader 照旧从 loaderUtil 拿
+export { hideNsfw } from './queries/prefs.js';
 
 /**
  * 多选类型。

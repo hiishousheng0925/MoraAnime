@@ -25,7 +25,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { envValue } from '../src/lib/server/envFile.js';
-import { IS_WIN, killTree, pidOnPort, processCmdline } from './platform.js';
+import { IS_WIN, killTree, pidOnPort, processCmdline, tailscaleIp } from './platform.js';
 
 export const DEFAULT_SITE = join(homedir(), 'Desktop', 'dev', 'j-anime-site');
 export const KEEP_RELEASES = 3;
@@ -228,10 +228,37 @@ export async function copyDbSnapshot(src, dst) {
   finally { d.close(); }
 }
 
+/**
+ * 正在跑的看门狗（<站点>\bin\service.ps1）的 PID。切换只是停掉 node、改 current，拉起全靠它 ——
+ * 2026-10-21 实测看门狗无声退出过，发布照样切换，新版本和回滚都没人拉起，正式站停了 6 分钟。
+ */
+export function watchdogPids(P) {
+  if (!IS_WIN) return [];
+  const svc = join(P.site, 'bin', 'service.ps1').toLowerCase();
+  const r = spawnSync('powershell', ['-NoProfile', '-Command',
+    "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+    { encoding: 'utf8' });
+  return (r.stdout || '').split(/\r?\n/).filter((l) => l.toLowerCase().includes(svc)).map((l) => +l.split('\t')[0]);
+}
+
+/**
+ * 切换前给正式库留一份快照：新版本启动时跑的 migrate 会直接改正式库（回填、重新归一），
+ * 健康检查不过只能把代码切回去，数据回不去；日常备份又只覆盖个人记录。只读 VACUUM INTO，保留最近 keep 份
+ */
+export async function snapshotProdDb(P, name, keep = 3) {
+  const dir = join(P.data, 'pre-release');
+  mkdirSync(dir, { recursive: true });
+  const dst = join(dir, `${name}.db`);
+  await copyDbSnapshot(join(P.data, 'j-anime.db'), dst);
+  const all = readdirSync(dir).filter((n) => n.endsWith('.db')).sort();
+  for (const n of all.slice(0, Math.max(0, all.length - keep))) rmSync(join(dir, n), { force: true });
+  return dst;
+}
+
 /** 健康检查该打的地址：BIND_LOCAL=1 → 127.0.0.1，否则 tailnet IP（和 bin/service.ps1 同一取法） */
 export function healthBase(port) {
   if (envValue('J_ANIME_BIND_LOCAL') === '1') return `http://127.0.0.1:${port}`;
-  const ip = spawnSync('tailscale', ['ip', '-4'], { encoding: 'utf8' }).stdout?.trim().split(/\r?\n/)[0];
+  const ip = tailscaleIp();
   return `http://${ip || '127.0.0.1'}:${port}`;
 }
 

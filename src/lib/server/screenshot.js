@@ -15,6 +15,7 @@ import { join, isAbsolute } from 'node:path';
 import { getSetting } from './queries.js';
 import { mp4Target } from './sources/stream.js';
 import { assertPublic } from './sources/scrape.js';
+import { limiter } from './sources/limit.js';
 
 export const DEFAULT_SHOT_DIR = join(homedir(), 'Pictures', 'j-anime');
 export const shotDir = () => {
@@ -48,12 +49,22 @@ export async function grabShot({ token, title, ep, t }) {
   return saveShot({ title, ep, t, png: await grabPng({ token, t }) });
 }
 
+/**
+ * ffmpeg 全站最多同时 2 个，再排 4 个，满了回 429（2026-10-21 审核）：
+ * 访客也能截图，原来每次请求都 spawn 一个 ffmpeg、没有上限，连点或被刷就是一堆进程同时拉流解码
+ */
+const ffSlot = limiter(2, 4, { busyMsg: '截图的人太多，请稍后再试' });
+
 /** 服务端截一帧：ffmpeg -ss t -i <url> -frames:v 1 → PNG（不存盘，其他账号拿去浏览器下载） */
 export async function grabPng({ token, t }) {
   const target = mp4Target(token);
   if (!target) throw new Error('链接已过期，请重新打开这一集');
   await assertPublic(new URL(target.url));
-  const png = await new Promise((resolve, reject) => {
+  return ffSlot(() => ffmpegFrame(target, t));
+}
+
+function ffmpegFrame(target, t) {
+  return new Promise((resolve, reject) => {
     const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-user_agent', target.ua,
       '-ss', String(Math.max(0, +t || 0)), '-i', target.url, '-frames:v', '1', '-f', 'image2', '-vcodec', 'png', 'pipe:1'],
       { windowsHide: true });
@@ -64,5 +75,4 @@ export async function grabPng({ token, t }) {
     ff.on('error', (e) => { clearTimeout(timer); reject(new Error(e.code === 'ENOENT' ? '本机没装 ffmpeg' : e.message)); });
     ff.on('close', (code) => { clearTimeout(timer); code === 0 && chunks.length ? resolve(Buffer.concat(chunks)) : reject(new Error(err.trim().split('\n').pop() || `ffmpeg 退出 ${code}`)); });
   });
-  return png;
 }

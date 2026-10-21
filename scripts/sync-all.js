@@ -14,6 +14,7 @@
  *   node scripts/sync-all.js --no-monthly  # 强制跳过（排查时用，别写进定时任务）
  */
 import { spawnSync } from 'node:child_process';
+import { planMonthly, MONTHLY_DAYS } from './sync-plan.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnvFile } from '../src/lib/server/envFile.js';
@@ -42,18 +43,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * 记 meta.last_monthly_at 则是：谁先跑到、距上次超过 30 天，谁就把它做掉，
  * 关机几天也只是晚几天，不会整轮跳过。
  */
-const MONTHLY_DAYS = 30;
 const db = getDb();
 const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key=?').get(k)?.value ?? null;
 const metaSet = (k, v) => db.prepare(
   `INSERT INTO meta (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(k, v);
 
 const lastMonthly = metaGet('last_monthly_at');
-const monthlyDue = !lastMonthly
-  || (Date.now() - Date.parse(lastMonthly)) / 86400000 >= MONTHLY_DAYS;
-const forced = process.argv.includes('--monthly');
-const skipMonthly = process.argv.includes('--no-monthly');   // 排查时用，别在定时任务里加
-const monthly = !skipMonthly && (forced || monthlyDue);
+// --no-monthly 排查时用，别在定时任务里加
+const { monthly, forced } = planMonthly(lastMonthly, process.argv);
 /**
  * 每一步的结果都记下来，整轮结束写一条 sync_all 汇总（#4）。
  * 原来失败只打一行日志就继续，sync_log 里 171 条全是 ok —— 失败的脚本通常直接
@@ -61,11 +58,16 @@ const monthly = !skipMonthly && (forced || monthlyDue);
  */
 const steps = [];
 const startedAt = new Date();
+const STEP_MS = 45 * 60_000, TOTAL_MS = 110 * 60_000;
 const run = (script, ...args) => {
   const name = `${script} ${args.join(' ')}`.trim();
   process.stdout.write(`\n▶ ${name}\n`);
   const t = Date.now();
-  const r = spawnSync(process.execPath, [join(HERE, script), ...args], { stdio: 'inherit' });
+  // 每步限时，并给整轮留 10 分钟写汇总：计划任务 2 小时到点会连 sync-all 一起杀掉，那样 sync_log 连一条失败记录都没有
+  // （原来某一步卡住 = 整晚无声无息，2026-10-21 审核）。ingest-bgm 要下 ~425MB，单步给 45 分钟
+  const left = TOTAL_MS - (Date.now() - startedAt.getTime());
+  const r = spawnSync(process.execPath, [join(HERE, script), ...args], { stdio: 'inherit', timeout: Math.max(60_000, Math.min(STEP_MS, left)) });
+  if (r.error?.code === 'ETIMEDOUT') console.error(`  ⚠️ ${name} 超时，已结束`);
   const ok = r.status === 0;
   steps.push({ name: script, ok, sec: Math.round((Date.now() - t) / 1000) });
   if (!ok) console.error(`  ⚠️ ${name} 退出码 ${r.status}（继续后面的任务）`);
@@ -76,7 +78,15 @@ console.log(`🔄 j-anime 同步 —— ${monthly ? '月度全量' : '日常'} �
 console.log(`   上次月度：${lastMonthly ?? '从未'}`
   + `${monthly ? `（${forced ? '命令行指定' : `距今 ≥ ${MONTHLY_DAYS} 天`}，这次补上）` : ''}`);
 
-run('backup.js');   // 任何破坏性操作前先备份个人记录
+// 任何破坏性操作前先备份个人记录。备份没成就整个停下：后面 fix-dup-alias / ingest-bgm 会合并番单（applyAliasDupes），
+// 原来返回值没人看，备份失败照样往下改（2026-10-21 审核）
+if (!run('backup.js')) {
+  db.prepare(`INSERT INTO sync_log (kind,started_at,finished_at,items,status,error)
+              VALUES ('sync_all',?,datetime('now'),?,'failed',?)`)
+    .run(startedAt.toISOString().slice(0, 19).replace('T', ' '), steps.length, '备份失败，同步中止（没有做任何改动）');
+  console.error('\n❌ 备份失败，同步中止');
+  process.exit(1);
+}
 
 // AOD 上游 2026-07-04 已归档（#1），每天下载 60MB 只会拿到同一份 —— 改成月度才跑一次全量
 // （留着它是为了 AOD 独有的数据：MAL/AniList ID、英文标签、制作公司、关联）。新番改由 ingest-bgm 进库。

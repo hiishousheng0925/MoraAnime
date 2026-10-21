@@ -7,10 +7,12 @@
   import YearPill from '$lib/ui/YearPill.svelte';
   import CoverBackdrop from '$lib/ui/CoverBackdrop.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
+  import { EXIT } from '$lib/ui/btn.js';
   import { SEASON_CN, SEASON_MONTHS, TYPE_OPTS, TYPE_CN, SEASON_SORT_OPTS, SEASON_DEFAULT_SORT } from '$lib/constants.js';
   import { dispTitle } from '$lib/format.js';
   import { makeHref } from '$lib/urlState.js';
   import { edgeFade } from '$lib/edgeFade.js';
+  import { centerCurrent } from '$lib/centerCurrent.js';
   import { media } from '$lib/media.svelte.js';
   import { page as pg } from '$app/state';
   import Page from '$lib/ui/Page.svelte';
@@ -52,17 +54,6 @@
   const selIsCur = $derived(data.season ? isCur(data.year, data.season) : data.year === data.cur.year);
   const covers = $derived(data.hero.covers);
   const stepHref = (x) => (x ? to({ year: x.year, season: x.season ?? 'all' }) : null);
-
-  /** 切换条在手机上横滑：选中那格要滚进视野（往回翻了几季之后，选中格在最右边会被挡住） */
-  function centerOn(node, key) {
-    const go = () => {
-      const on = node.querySelector('[aria-current="page"]');
-      if (on && node.scrollWidth > node.clientWidth)
-        node.scrollLeft = on.offsetLeft - (node.clientWidth - on.offsetWidth) / 2;
-    };
-    go();
-    return { update: go };
-  }
 </script>
 
 <Page fill>
@@ -116,7 +107,8 @@
          class="step {data.hero.prev ? '' : 'pointer-events-none opacity-30'}" aria-disabled={!data.hero.prev || undefined}>
         <CaretLeft size={16} weight="bold" />
       </a>
-      <div use:edgeFade use:centerOn={pg.url.search}
+      <!-- 手机上横滑：往回翻了几季之后，选中格在最右边会被挡住，滚到中间 -->
+      <div use:edgeFade use:centerCurrent={pg.url.search}
            class="flex min-w-0 flex-1 gap-1.5 overflow-x-auto sm:flex-initial overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {#each data.hero.strip as x}
           {@const on = x.year === data.year && x.season === data.season}
@@ -187,8 +179,8 @@
     {:else}
       <div class="mt-5">
         <EmptyState title="{data.year} 年{SEASON_CN[data.season]}季没有符合条件的番剧">
-          {#if data.min > 1}<a href={to({ min: 1 })} class="exit">门槛改为全部</a>{/if}
-          {#if !data.typesAreDefault}<a href={to({ type: null })} class="exit">全部类型</a>{/if}
+          {#if data.min > 1}<a href={to({ min: 1 })} class={EXIT}>门槛改为全部</a>{/if}
+          {#if !data.typesAreDefault}<a href={to({ type: null })} class={EXIT}>全部类型</a>{/if}
         </EmptyState>
       </div>
     {/if}
@@ -197,7 +189,7 @@
     <div class="mt-4 space-y-12">
       {#each shownSeasons as s (s)}
         <section aria-labelledby="sec-{s}" data-season={s}>
-          <div class="sticky top-[53px] z-20 -mx-4 flex items-center gap-2.5 bg-ink-950/80 px-4 py-2.5 backdrop-blur-md">
+          <div class="sticky top-[var(--hdr-h)] z-20 -mx-4 flex items-center gap-2.5 bg-ink-950/80 px-4 py-2.5 backdrop-blur-md">
             <h2 id="sec-{s}" class="border-l-[3px] pl-3 text-[20px] font-semibold leading-tight sm:text-[22px] {TONE[s].bar}">
               {SEASON_CN[s]}季<span class="ml-2 text-[13px] font-normal text-ink-400">{fmtMonths(s)}</span>
             </h2>
@@ -268,15 +260,6 @@
     transition: border-color 150ms;
   }
   .step:hover { border-color: var(--c-border-strong); }
-  .exit {
-    border-radius: 9999px;
-    border: 1px solid var(--c-border-strong);
-    background: var(--c-surface);
-    padding: 6px 14px;
-    font-size: 13px;
-    color: var(--c-text-soft);
-  }
-  .exit:hover { border-color: var(--c-accent); color: var(--c-accent-ink); }
 
   /* 扇形：中间一张最大、略抬高；两侧各转 7° 压在它下面 */
   .fan { align-items: flex-end; padding-bottom: 6px; }

@@ -6,17 +6,29 @@
   import HeroUpdate from '$lib/ui/HeroUpdate.svelte';
   import EpisodeStepper from '$lib/ui/EpisodeStepper.svelte';
   import Progress from '$lib/ui/Progress.svelte';
-  import { STATUS_CN, TYPE_CN } from '$lib/constants.js';
+  import { STATUS_CN, TYPE_CN, showScore } from '$lib/constants.js';
   import { dispTitle, epTitle } from '$lib/format.js';
   import { entry } from '$lib/api.js';
+  import { toast } from '$lib/toast.svelte.js';
+  import { invalidate } from '$app/navigation';
   import Play from 'phosphor-svelte/lib/Play';
   import Lightning from 'phosphor-svelte/lib/Lightning';
   import Page from '$lib/ui/Page.svelte';
   import { nextEp, nextAirText } from '$lib/nextEp.js';
   let { data } = $props();
 
+  /**
+   * 本地 state：+1 后就地改进度，不走导航。同步认准 data.watching 的引用（同 triage 页的说明）——
+   * bump 后 invalidate('app:stats') 会重跑根布局，合并出来的 data 是新对象，
+   * 无条件 `items = data.watching` 会把刚改的进度盖回旧值
+   */
   let items = $state(data.watching);
-  $effect(() => { items = data.watching; });   // 导航后同步，见 triage 里的说明
+  let syncedFrom = data.watching;
+  $effect(() => {
+    if (data.watching === syncedFrom) return;
+    syncedFrom = data.watching;
+    items = data.watching;
+  });
   const hasAny = $derived((data.stats.total ?? 0) > 0);
   const triaged = $derived(data.triage.decided > 0);
   const remain = $derived(data.triage.remaining ?? 0);
@@ -55,14 +67,23 @@
                                               verb: wn.kind === 'upcoming' ? '开播' : '更新' }) : null);
   const rec = $derived(data.recommend[0]);
 
+  // 防连点：请求没回来前同一部再点不发（连点两下 +1 会在旧进度上各加一次，结果取决于先后）
+  const pending = {};
   async function bump(a, delta) {
-    const { entry: e } = await entry.bump(a.id, delta);
-    if (e.status === 'completed') { items = items.filter((x) => x.id !== a.id); return; }
-    items = items.map((x) => x.id === a.id
-      ? { ...x, current_episode: e.current_episode,
-          // 有分集数据时按已播集数算（见 +page.server.js），没有就按总集数
-          behind: (x.aired ?? x.episodes) != null ? (x.aired ?? x.episodes) - e.current_episode : null }
-      : x);
+    if (pending[a.id]) return;
+    pending[a.id] = true;
+    try {
+      const { entry: e } = await entry.bump(a.id, delta);
+      if (e.status === 'completed') items = items.filter((x) => x.id !== a.id);
+      else items = items.map((x) => x.id === a.id
+        ? { ...x, current_episode: e.current_episode,
+            // 有分集数据时按已播集数算（见 +page.server.js），没有就按总集数
+            behind: (x.aired ?? x.episodes) != null ? (x.aired ?? x.episodes) - e.current_episode : null }
+        : x);
+      // 侧栏 / 顶栏的「在看」「看完」数字在根布局 load 里算，同快速标记页
+      invalidate('app:stats');
+    } catch (err) { toast.error(err); }
+    finally { delete pending[a.id]; }
   }
 
   const BTN = `inline-flex h-11 items-center justify-center gap-2 rounded-xl px-5 text-[14.5px] font-semibold
@@ -156,7 +177,7 @@
   {:else if rec}
     <HeroUpdate a={rec} kicker="推荐" tone="accent" title={dispTitle(rec)} href="/anime/{rec.id}">
       <p class="mt-2 text-[15px] text-ink-200">
-        {#if rec.bgm_score && (rec.bgm_votes ?? 0) >= 100}<b class="font-semibold text-warm">★ {rec.bgm_score.toFixed(1)}</b>{' · '}{/if}{[rec.year, TYPE_CN[rec.type] ?? rec.type, rec.episodes ? `${rec.episodes} 集` : null].filter(Boolean).join(' · ')}
+        {#if showScore(rec)}<b class="font-semibold text-warm">★ {rec.bgm_score.toFixed(1)}</b>{' · '}{/if}{[rec.year, TYPE_CN[rec.type] ?? rec.type, rec.episodes ? `${rec.episodes} 集` : null].filter(Boolean).join(' · ')}
       </p>
       {#snippet actions()}
         <!-- 访客也能站内播放，主按钮一样给「播放」；登录入口在顶栏 / 侧栏，hero 里不重复放 -->

@@ -14,7 +14,7 @@
  * 面板底部「在目录中搜索」进 /catalog?q=，那里是完整的新 → 旧列表。
  */
 import { getDb } from '../db.js';
-import { getSetting, yearWindow } from './prefs.js';
+import { hideNsfw, yearWindow } from './prefs.js';
 import { currentSeason } from './catalog.js';
 import { toFtsQuery } from '../text.js';
 import { normTitle, ensureNorm } from '../normTitle.js';
@@ -30,7 +30,7 @@ const COLS = `a.id, a.title, a.title_ja, a.title_cn, a.type, a.year, a.season, a
 function visible() {
   const w = ['a.is_stub = 0', 'a.is_jp = 1'];
   const p = [];
-  if (getSetting('hide_nsfw', '0') === '1') w.push('a.is_nsfw = 0');
+  if (hideNsfw()) w.push('a.is_nsfw = 0');
   const { min, max } = yearWindow();
   w.push('(a.year IS NULL OR (a.year >= ? AND a.year <= ?))');
   p.push(min, max);

@@ -31,9 +31,10 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
  * @param {HTMLVideoElement} video
  * @param {HTMLCanvasElement} canvas  尺寸由调用方按显示大小 × devicePixelRatio 设好
  * @param {'fast'|'quality'} mode
- * @returns {Promise<() => void>} stop
+ * @param {(e: unknown) => void} [onError]  运行期出错（某一帧抛异常 / 显卡设备丢失）时调一次，此时已自行停下、销毁设备
+ * @returns {Promise<() => void>} stop（启动时第一帧就失败则直接 reject，不走 onError）
  */
-export async function startSuperRes(video, canvas, mode) {
+export async function startSuperRes(video, canvas, mode, onError) {
   const A4K = await import('anime4k-webgpu');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('没有可用的显卡');
@@ -42,35 +43,59 @@ export async function startSuperRes(video, canvas, mode) {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
 
-  const w = video.videoWidth, h = video.videoHeight;
-  const input = device.createTexture({ size: [w, h, 1], format: 'rgba16float',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
-  const Preset = mode === 'quality' ? A4K.ModeAA : A4K.ModeA;
-  const preset = new Preset({ device, inputTexture: input,
-    nativeDimensions: { width: w, height: h }, targetDimensions: { width: canvas.width, height: canvas.height } });
-
   const module = device.createShaderModule({ code: SHADER });
   const pipeline = device.createRenderPipeline({ layout: 'auto',
     vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] },
     primitive: { topology: 'triangle-list' } });
-  const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: device.createSampler({ magFilter: 'linear', minFilter: 'linear' }) },
-    { binding: 1, resource: preset.getOutputTexture().createView() }] });
+  const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+  const Preset = mode === 'quality' ? A4K.ModeAA : A4K.ModeA;
+
+  // 输入纹理和 Anime4K 管线跟着片源分辨率走：hls.js 自动切码率（720p ↔ 1080p）后尺寸会变，
+  // 旧纹理再拷新帧进去会报错，所以每帧比一次，变了就按新尺寸重建（设备和渲染管线不动，播放不断）。
+  // 预设没有销毁接口，旧的中间纹理留给 GC，停下时 device.destroy() 一并释放
+  let w = 0, h = 0, input = null, preset = null, bind = null;
+  const build = () => {
+    input?.destroy();
+    w = video.videoWidth; h = video.videoHeight;
+    input = device.createTexture({ size: [w, h, 1], format: 'rgba16float',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+    preset = new Preset({ device, inputTexture: input,
+      nativeDimensions: { width: w, height: h }, targetDimensions: { width: canvas.width, height: canvas.height } });
+    bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: sampler },
+      { binding: 1, resource: preset.getOutputTexture().createView() }] });
+  };
+  const draw = () => {
+    // 换片源 / 切码率的间隙 videoWidth 会短暂为 0：这一帧跳过，画面停在上一帧
+    if (!video.videoWidth || !video.videoHeight) return;
+    if (video.videoWidth !== w || video.videoHeight !== h) build();
+    device.queue.copyExternalImageToTexture({ source: video }, { texture: input }, [w, h]);
+    const enc = device.createCommandEncoder();
+    preset.pass(enc);
+    const pass = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(),
+      clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
+    pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.draw(3); pass.end();
+    device.queue.submit([enc.finish()]);
+  };
 
   let stopped = false, handle = 0;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true; video.cancelVideoFrameCallback?.(handle); device.destroy();
+  };
+  // 运行期的错误没有调用方能接住（在 requestVideoFrameCallback 里抛），只能停下后回调通知，
+  // 否则调用方仍以为超分在画、<video> 一直藏着 → 画面冻住
+  const fail = (e) => { if (stopped) return; stop(); onError?.(e); };
+  // 驱动崩溃 / 显卡被占走 / 系统休眠都会丢设备；自己 destroy 的也会触发（reason = 'destroyed'），那时 stopped 已是 true
+  device.lost.then((info) => fail(new Error(`显卡设备丢失：${info.message || info.reason}`)));
+
   const frame = () => {
     if (stopped) return;
-    try {
-      device.queue.copyExternalImageToTexture({ source: video }, { texture: input }, [w, h]);
-      const enc = device.createCommandEncoder();
-      preset.pass(enc);
-      const pass = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
-      pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.draw(3); pass.end();
-      device.queue.submit([enc.finish()]);
-    } catch (e) { stopped = true; device.destroy(); throw e; }
+    try { draw(); } catch (e) { fail(e); return; }
     handle = video.requestVideoFrameCallback(frame);
   };
-  frame();   // 先画一帧：暂停中开超分也立刻看得到效果；之后每出一帧画一次
-  return () => { stopped = true; video.cancelVideoFrameCallback?.(handle); device.destroy(); };
+  // 先画一帧：暂停中开超分也立刻看得到效果；之后每出一帧画一次。第一帧的错误直接抛给调用方
+  try { draw(); } catch (e) { stop(); throw e; }
+  handle = video.requestVideoFrameCallback(frame);
+  return stop;
 }

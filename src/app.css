@@ -24,6 +24,10 @@
   --color-warm-fill: var(--c-warm-fill);
   /* 删除 / 排除 / 报错的红字。原来写死 text-red-300 / 400 —— 那是给暗底配的浅红，亮色主题下只有 1.4–2.8:1（#111） */
   --color-danger: var(--c-danger);
+  /* 危险操作的实色按钮底（确认删除），上面配白字。danger 本身是字色（暗色下是浅红），不能拿来当底 —— 原来 Confirm 写死 red-600 */
+  --color-danger-fill: var(--c-danger-fill);
+  /* 封面上「泡面」小角标的底（配白字）。压在任意封面上，和 MY_STATUS_BADGE 一样不随主题变 —— 原来两处写死 amber-950 */
+  --color-short-badge: var(--c-short-badge);
   /* 主按钮上的前景色。亮色 accent 是深蓝→用白字；暗色 accent 是浅蓝→用近黑字。
      写死 text-black 会让亮色主按钮只有 3.96:1，不合规。 */
   --color-on-accent: var(--c-on-accent);
@@ -72,6 +76,9 @@
   --c-warm: #ffb454;
   --c-warm-fill: #ffb454;
   --c-danger: #fca5a5;
+  /* 下面两个两套主题同一个值（亮色块不覆盖）：白字在 #dc2626 上 4.83:1 */
+  --c-danger-fill: #dc2626;
+  --c-short-badge: #461901;
   --c-cover: linear-gradient(145deg, #262e3f, #1b2130);
   /* 暗色不用投影（在深底上看不见），改用一道顶部内高光模拟抬升 */
   --c-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
@@ -265,3 +272,5 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 
 /* 手机底部标签栏的高度（框架段加标签栏时在 :root 上设；默认 0）。Toaster / Sheet 据此浮在它上面 */
 :root { --tabbar-h: 0px; }
+/* 顶栏高度（+layout.svelte 的 <header>）。吸顶小节头 / 侧栏 / 一屏高的外框都要减它 —— 原来 53px、73px 散在六个文件里 */
+:root { --hdr-h: 53px; }

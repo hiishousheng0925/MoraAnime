@@ -47,6 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_anime_srccnt  ON anime(source_count DESC);
 CREATE INDEX IF NOT EXISTS idx_anime_bgmcoll ON anime(bgm_collection DESC);
 CREATE INDEX IF NOT EXISTS idx_anime_mal     ON anime(mal_id);
 CREATE INDEX IF NOT EXISTS idx_anime_bgm     ON anime(bgm_id);
+-- 导入备份按 anilist_id → mal_id → bgm_id → 标题 逐级定位条目（backup.js makeResolver）。
+-- 2026-10-21 审核：anilist_id 是第一级、title 是兜底那两级，原来没索引，每解析一行扫一遍 4 万行
+CREATE INDEX IF NOT EXISTS idx_anime_anilist ON anime(anilist_id);
+CREATE INDEX IF NOT EXISTS idx_anime_title   ON anime(title);
 -- 放送表只取有更新日的 ~76 行；没有这条时规划器走年份索引扫大半张表（10.8ms）
 CREATE INDEX IF NOT EXISTS idx_anime_weekday ON anime(bgm_weekday) WHERE bgm_weekday IS NOT NULL;
 

@@ -3,6 +3,7 @@
   import YearPill from '$lib/ui/YearPill.svelte';
   import ResetButton from '$lib/ui/ResetButton.svelte';
   import { dispTitle } from '$lib/format.js';
+  import { showScore } from '$lib/constants.js';
   import { triage } from '$lib/api.js';
   import { toast } from '$lib/toast.svelte.js';
   import { invalidate } from '$app/navigation';
@@ -11,6 +12,7 @@
   import Page from '$lib/ui/Page.svelte';
   import Progress from '$lib/ui/Progress.svelte';
   import EmptyState from '$lib/ui/EmptyState.svelte';
+  import { EXIT, CTA } from '$lib/ui/btn.js';
   import { CARD_GRID } from '$lib/ui/grid.js';
   import { media } from '$lib/media.svelte.js';
   import { page as pg } from '$app/state';
@@ -19,6 +21,7 @@
   import { cubicOut } from 'svelte/easing';
   import Check from 'phosphor-svelte/lib/Check';
   import Confetti from 'phosphor-svelte/lib/Confetti';
+  import LoginGate from '$lib/ui/LoginGate.svelte';
   let { data } = $props();
 
   const href = $derived(makeHref('/triage', pg.url.searchParams));
@@ -177,7 +180,6 @@
       css: (t) => `opacity:${t};transform:translateY(${(1 - t) * 10}px) scale(${0.97 + 0.03 * t})`
     };
   }
-  import LoginGate from '$lib/ui/LoginGate.svelte';
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -253,10 +255,9 @@
   {#if !queue.length}
     <div class="mt-5">
       <EmptyState icon={Confetti} title="此范围已全部判定">
-        <a href="/mine" class="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-on-accent transition hover:brightness-110">我的番单</a>
+        <a href="/mine" class={CTA}>我的番单</a>
         {#if lastBatch}
-          <button onclick={undo} disabled={saving}
-                  class="rounded-lg border border-ink-600 bg-ink-900 px-3.5 py-2 text-[13px] text-ink-200 disabled:opacity-50">
+          <button onclick={undo} disabled={saving} class={EXIT}>
             撤销上一批（{lastBatch.n}）
           </button>
         {/if}
@@ -281,7 +282,7 @@
                       {on ? 'is-on -translate-y-[3px] ring-2 ring-accent'
                           : 'shadow-md shadow-black/30 ring-1 ring-white/5 group-hover:-translate-y-0.5'}">
             <Cover {a} cls="aspect-2/3" />
-            {#if a.bgm_score != null && (a.bgm_votes ?? 0) >= 100}
+            {#if showScore(a)}
               <div class="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1.5 pt-6">
                 <span class="text-[12px] font-semibold text-white drop-shadow">★ {a.bgm_score.toFixed(1)}</span>
               </div>

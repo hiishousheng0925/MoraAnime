@@ -1,6 +1,7 @@
 import { listFilters, getSetting, yearWindow, listWatchSites }
   from '$lib/server/queries.js';
 import { YEAR_HARD_MIN, YEAR_HARD_MAX } from '$lib/constants.js';
+import { hideNsfw } from '$lib/server/loaderUtil.js';
 import { getDb } from '$lib/server/db.js';
 import { shotDir, DEFAULT_SHOT_DIR } from '$lib/server/screenshot.js';
 import { listAllow, sessionCount } from '$lib/server/auth.js';
@@ -14,7 +15,7 @@ export function load({ locals }) {
     sessions: u ? sessionCount(u.id) : 0,
     allow: admin ? listAllow() : [],
     filters: listFilters(),
-    hideNsfw: getSetting('hide_nsfw', '0') === '1',
+    hideNsfw: hideNsfw(),
     yearWin: yearWindow(),
     yearHard: { min: YEAR_HARD_MIN, max: YEAR_HARD_MAX },
     shareToken: getSetting('share_token', ''),

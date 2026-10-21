@@ -11,8 +11,11 @@ import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-/** 会影响构建产物的目录与文件 */
-const WATCH = ['src', 'static', 'svelte.config.js', 'vite.config.js', 'package.json'];
+/**
+ * 会进版本的目录与文件。scripts/（启动时跑的 migrate、每日同步）、deploy/、锁文件也会被组装进版本、
+ * 作用到正式库 —— 原来不在指纹里，测试站验过后再改迁移脚本，门禁拦不住（2026-10-21 审核）
+ */
+const WATCH = ['src', 'static', 'scripts', 'deploy', 'svelte.config.js', 'vite.config.js', 'package.json', 'package-lock.json'];
 
 const walk = (p) => {
   if (!existsSync(p)) return [];

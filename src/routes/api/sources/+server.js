@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { searchAll, getEpisodes, resolveEpisode } from '$lib/server/sources/index.js';
 import { scoreHit, searchKeywords } from '$lib/server/sources/rank.js';
 import { watchNames, setWatchPick, recordResolve, embedRates } from '$lib/server/queries.js';
+import { currentUid } from '$lib/server/userCtx.js';
 
 /**
  * GET /api/sources?op=search&q=关键词[&id=番剧 id][&expand=1]   带 id 时每条结果附 score（见 rank.js），
@@ -9,7 +10,7 @@ import { watchNames, setWatchPick, recordResolve, embedRates } from '$lib/server
  *     /api/sources?op=episodes&site=…&url=…
  *     /api/sources?op=resolve&site=…&url=…[&fresh=1]   fresh：跳过解析缓存（「重新加载」）
  */
-export async function GET({ url }) {
+export async function GET({ url, request }) {
   const q = url.searchParams;
   const op = q.get('op');
   if (op === 'search') {
@@ -41,9 +42,11 @@ export async function GET({ url }) {
   const site = q.get('site') ?? '', target = q.get('url') ?? '';
   if (op === 'episodes') return json(await getEpisodes(site, target));
   if (op === 'resolve') {
-    const r = await resolveEpisode(site, target, { fresh: q.get('fresh') === '1' });
-    // 「链接已过期」是我们自己的缓存问题，不算这个站的战绩
-    if (r.url || !/过期/.test(r.error ?? '')) recordResolve(site, !!r.url);
+    // request.signal：浏览器换了一集 / 关了页，服务端的解析和排队中的嗅探跟着停（2026-10-21 审核）
+    const r = await resolveEpisode(site, target, { fresh: q.get('fresh') === '1', signal: request.signal });
+    // 「链接已过期」是我们自己的缓存问题，取消 / 繁忙（transient）也不是这个站的问题，都不算战绩。
+    // 战绩是全站共用的排序依据，只认登录账号的解析：访客能随手刷接口把某个站刷成「只能跳转」（2026-10-21 审核）
+    if (currentUid() > 0 && !r.transient && (r.url || !/过期/.test(r.error ?? ''))) recordResolve(site, !!r.url);
     return json(r);
   }
   return json({ error: '未知操作' }, { status: 400 });

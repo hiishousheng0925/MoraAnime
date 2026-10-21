@@ -49,8 +49,10 @@ export async function assertPublic(u) {
   if (!addrs.length || addrs.some(privateAddr)) throw new Error('地址不允许');
 }
 
-export async function fetchText(url, rule, referer) {
-  const signal = AbortSignal.timeout(TIMEOUT);   // 整条重定向链共用一个超时
+/** outer：调用方的取消信号（解析限时 / 浏览器断开），和超时合在一起（2026-10-21 审核） */
+export async function fetchText(url, rule, referer, outer) {
+  const timeout = AbortSignal.timeout(TIMEOUT);   // 整条重定向链共用一个超时
+  const signal = outer ? AbortSignal.any([timeout, outer]) : timeout;
   let u = new URL(url);
   for (let hop = 0; ; hop++) {
     await assertPublic(u);

@@ -1,5 +1,5 @@
 <script>
-  /** −/+1 进度控件。首页和详情页都要用，是全站最高频的交互。 */
+  /** −/+1 进度控件。首页「在看」列表每行一个，是全站最高频的交互（详情页用的是 EpisodeSlider）。 */
   let { onbump, disabled = false, size = 'md' } = $props();
   const S = { md: ['h-9 w-9', 'h-11 w-14 text-base'], lg: ['h-10 w-10 text-lg', 'h-12 w-16 text-lg'] };
 </script>

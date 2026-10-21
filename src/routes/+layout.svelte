@@ -17,6 +17,7 @@
   import { replaceState } from '$app/navigation';
   import { toast } from '$lib/toast.svelte.js';
   import { DRAWER_COOKIE } from '$lib/constants.js';
+  import { media } from '$lib/media.svelte.js';
   import { NAV, NAV_GROUPS, isActive } from '$lib/nav.js';
   let { children, data } = $props();
 
@@ -36,8 +37,6 @@
   beforeNavigate(({ willUnload, to }) => {
     if (updated.current && !willUnload && to?.url) location.href = to.url.href;
   });
-
-  const isWide = () => browser && window.matchMedia('(min-width: 1024px)').matches;
 
   // 初值来自服务端读的 cookie，首屏就是正确状态 —— 不再有「收起 → 弹出」那一下。
   // 用 $state 而不是 $derived：这之后由用户点击控制，不该被导航时的 data 覆盖。
@@ -67,16 +66,12 @@
    * < md 时由底部标签栏的「更多」打开；md–lg 之间由顶栏汉堡打开。
    */
   let mob = $state(false);
-  let wide = $state(false);
-  $effect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const on = () => { wide = mq.matches; if (wide) mob = false; };
-    on(); mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  });
+  const wide = $derived(media.wide);
+  // 拉宽到桌面时收掉手机抽屉的状态，再缩回来不会自己弹出
+  $effect(() => { if (wide) mob = false; });
   const shown = $derived(wide ? deskOpen : mob);
   const toggle = () => {
-    if (!isWide()) mob = !mob;
+    if (!wide) mob = !mob;
     else if (isWatch) watchOpen = !watchOpen;
     else setOpen(!open);
   };
@@ -147,7 +142,7 @@
   · 测试站的暖色叠在正常的表面色上（原来只有 6% 暖色、底下是透明的：亮色主题下发灰发脏）
 -->
 <!-- 观看页手机上顶栏不吸顶：播放器自己吸顶（watch 段），两个都吸顶会叠在一起 -->
-<header class="hdr top-0 z-40 flex h-[53px] items-center gap-2 border-b bg-ink-900/90 pl-3.5 pr-3 backdrop-blur-xl
+<header class="hdr top-0 z-40 flex h-[var(--hdr-h)] items-center gap-2 border-b bg-ink-900/90 pl-3.5 pr-3 backdrop-blur-xl
                {isWatch ? 'md:sticky' : 'sticky'}
                {isTest ? 'test border-warm/40' : 'border-ink-700'}">
   <button onclick={toggle} aria-label={wide ? (shown ? '收起侧栏' : '展开侧栏') : '菜单'} aria-expanded={shown}
@@ -199,13 +194,13 @@
 <div class="flex">
   {#if mob}
     <button aria-label="关闭菜单" onclick={() => (mob = false)}
-            class="scrim fixed inset-0 z-[41] bg-black/50 backdrop-blur-[2px] md:top-[53px] lg:hidden"></button>
+            class="scrim fixed inset-0 z-[41] bg-black/50 backdrop-blur-[2px] md:top-[var(--hdr-h)] lg:hidden"></button>
   {/if}
 
   <!-- 抽拉侧栏：始终 fixed；桌面用下面的占位块留出宽度（之前两者并存导致了双倍空白）。
        手机（<md）上是「更多」抽屉：盖住顶栏、停在底部标签栏上面，自带品牌行 -->
   <aside id="sidebar" inert={wide ? !(deskOpen || rail) : !mob} class:rail
-         class="fixed top-[53px] bottom-0 left-0 z-30 flex w-64 flex-col overflow-y-auto overflow-x-hidden
+         class="fixed top-[var(--hdr-h)] bottom-0 left-0 z-30 flex w-64 flex-col overflow-y-auto overflow-x-hidden
                 border-r border-ink-700 bg-ink-900 px-3 pb-3 pt-2 transition-[transform,width] duration-200 ease-out
                 max-md:top-0 max-lg:z-[42] max-md:bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom))]
                 max-md:w-[17.5rem] max-md:rounded-r-2xl {mob ? 'max-lg:shadow-[16px_0_40px_-12px_rgb(0_0_0/0.5)]' : ''}

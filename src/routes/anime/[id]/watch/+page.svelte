@@ -16,7 +16,7 @@
   import { takeShot } from '$lib/shot.js';
   import { watchUrl } from '$lib/watchSite.js';
   import { WATCH_AUTO_PICK } from '$lib/constants.js';
-  import { epNum } from '$lib/episodeNo.js';
+  import { epNo, indexOfEp, loadQuality, saveQuality } from './watchUtil.js';
   import { startEp } from '$lib/nextEp.js';
   import { epTitle } from '$lib/format.js';
   import Page from '$lib/ui/Page.svelte';
@@ -64,20 +64,17 @@
   let jumpOnly = $state({});
   const misses = {};
 
-  const api = (params) => fetch(`/api/sources?${new URLSearchParams(params)}`).then((r) => r.json());
+  /**
+   * 作废旧请求（2026-10-21 审核）：同一个组件在两部番之间导航时，上一部的搜索结果、自动选源后的 playAt 会落到新番上；
+   * 连点几集时旧的解析也还在服务端排队嗅探。run = 这一部番的请求，play = 当前这一集的解析；每个 await 之后看 aborted
+   */
+  let run = new AbortController(), play = null;
+  const api = (params, signal) => fetch(`/api/sources?${new URLSearchParams(params)}`, { signal }).then((r) => r.json());
   const found = $derived((results ?? []).filter((r) => r.hits.length));
   const eps = $derived(roads[road]?.eps ?? []);
   const watchLinks = $derived(
     (data.watchSites ?? []).map((w) => ({ id: w.id, name: w.name, url: watchUrl(w.url, a) })).filter((w) => w.url)
   );
-
-  /** 集号：站上写的「第 3 集」「03」优先，认不出来按位置（和服务端排顺序共用 epNum） */
-  const epNo = (ep, i) => epNum(ep.name) ?? i + 1;
-  /** 第 n 集在列表里的下标：按集号找（列表里可能夹着 PV / 总集篇），找不到按位置 */
-  const indexOfEp = (list, n) => {
-    const i = list.findIndex((ep, k) => epNo(ep, k) === n);
-    return i >= 0 ? i : Math.min(Math.max(n - 1, 0), Math.max(list.length - 1, 0));
-  };
 
   /** 从哪一集开始：?ep=N 优先，其余和详情页按钮同一套（$lib/nextEp.js；追平时停在最新一集，#7） */
   const askedEp = +(page.url.searchParams.get('ep') ?? 0) || 0;
@@ -85,24 +82,27 @@
     total: data.aired?.total ?? a.episodes, aired: data.aired?.aired ?? null, has: (n) => list.some((ep, k) => epNo(ep, k) === n) }));
 
   $effect(() => {
-    const id = a.id;
+    a.id;
     untrack(() => {
+      run = new AbortController();
       progress = a.current_episode ?? 0;
       q = a.title_cn || a.title_ja || a.title || '';
-      results = null; pick = null; roads = []; cur = null; showPicker = false;
-      start(id);
+      results = null; pick = null; roads = []; cur = null; showPicker = false; loadingEps = false;
+      start(run.signal);
     });
+    return () => { run.abort(); play?.abort(); };   // 换番前、离开页面时
   });
 
   /** expand：自动搜索时让服务端多用几个关键词（手动在「换片源」里输入的就只搜那一个） */
   async function search(expand = false) {
-    searching = true;
+    const sig = run.signal; searching = true;
     try {
-      const r = await api({ op: 'search', q: q.trim(), id: a.id, ...(expand ? { expand: 1 } : {}) });
+      const r = await api({ op: 'search', q: q.trim(), id: a.id, ...(expand ? { expand: 1 } : {}) }, sig);
+      if (sig.aborted) return false;
       if (r.error) { toast.error(r.error); return false; }
       results = r.results;
       return true;
-    } catch (e) { toast.error(e); return false; } finally { searching = false; }
+    } catch (e) { if (!sig.aborted) toast.error(e); return false; } finally { if (!sig.aborted) searching = false; }
   }
 
   /** 只能跳转的站：这次会话里解析失败过，或历史战绩里基本解析不出直链 */
@@ -121,43 +121,44 @@
     return { remembered, list: remembered ? [remembered, ...uniq] : uniq };
   }
 
-  async function start(id) {
+  async function start(sig) {
     if (!q.trim()) { searching = false; return; }
-    if (!(await search(true)) || id !== a.id) return;
+    if (!(await search(true)) || sig.aborted) return;
     const { remembered, list } = candidates();
     if (!list.length) { showPicker = true; return; }
     let fallback = null;
     for (const c of list.slice(0, AUTO_TRIES)) {
-      if (id !== a.id) return;
-      if (!(await choose(c.site, c.hit, { auto: true }))) continue;
+      if (!(await choose(c.site, c.hit, { auto: true }))) { if (sig.aborted) return; continue; }
       const ok = await playAt(startIndex(eps));
+      if (sig.aborted) return;
       // 手动选过的那条就算只能跳转也用它；自动兜底记下的只能跳转的站不粘住 ——
       // 转生就是剑 第二季 当初只搜得到 baimao，记住它之后 akianime 搜得到了也轮不上
       const sticky = c === remembered && !!data.pick?.manual;
       if (ok || sticky) { manual = sticky; return save(); }
       fallback ??= c;
     }
-    if (fallback && id === a.id) {
-      await choose(fallback.site, fallback.hit, { auto: true });
-      await playAt(startIndex(eps));
-      manual = false;
-      save();
-    } else if (id === a.id) {
+    if (fallback) {
+      await choose(fallback.site, fallback.hit, { auto: true }); if (sig.aborted) return;
+      await playAt(startIndex(eps)); if (sig.aborted) return;
+      manual = false; save();
+    } else {
       // 候选全都取不到剧集：别把最后试过的那个站留在页头和片源栏上（Chidori 显示「片源 baimao」却没东西播）
       pick = null; roads = []; cur = null; showPicker = true;
     }
   }
 
   async function choose(site, hit, { auto = false } = {}) {
+    const sig = run.signal; play?.abort();
     pick = { site, name: hit.name, url: hit.url }; roads = []; cur = null; loadingEps = true;
     const mem = data.pick;
     try {
-      const r = await api({ op: 'episodes', site, url: hit.url });
+      const r = await api({ op: 'episodes', site, url: hit.url }, sig);
+      if (sig.aborted) return false;
       if (r.error) { if (!auto) toast.error(r.error); return false; }
       roads = r.roads ?? [];
       road = mem && mem.site === site && mem.name === hit.name && mem.road < roads.length ? mem.road : 0;
       return roads.length > 0;
-    } catch (e) { if (!auto) toast.error(e); return false; } finally { loadingEps = false; }
+    } catch (e) { if (!auto && !sig.aborted) toast.error(e); return false; } finally { if (!sig.aborted) loadingEps = false; }
   }
 
   /** 手动换片源也停在当前这一集（和换线路同理，#94） */
@@ -186,15 +187,15 @@
    * 服务端只认一小时内发出去过的链接，服务器重启后也全部作废（#91）：开着页面看完两三集再点下一集，
    * 解析就回「链接已过期」。这不是这个站的问题 —— 后台重搜一遍、重取剧集，同一集再解析一次
    */
-  async function relink() {
+  async function relink(sig) {
     const site = pick?.site, name = pick?.name, n = cur?.n;
-    const r = await api({ op: 'search', q: q.trim(), id: a.id, expand: 1 }).catch(() => null);
-    if (!r?.results || pick?.site !== site) return null;
+    const r = await api({ op: 'search', q: q.trim(), id: a.id, expand: 1 }, sig).catch(() => null);
+    if (!r?.results || sig.aborted || pick?.site !== site) return null;
     results = r.results;
     const hit = r.results.find((x) => x.site === site)?.hits.find((h) => h.name === name);
     if (!hit) return null;
-    const e = await api({ op: 'episodes', site, url: hit.url }).catch(() => null);
-    if (!e?.roads?.length || pick?.site !== site) return null;
+    const e = await api({ op: 'episodes', site, url: hit.url }, sig).catch(() => null);
+    if (!e?.roads?.length || sig.aborted || pick?.site !== site) return null;
     pick = { site, name, url: hit.url };
     roads = e.roads; if (road >= roads.length) road = 0;
     const i = indexOfEp(eps, n);
@@ -205,23 +206,25 @@
   async function playAt(i, { fresh = false } = {}) {
     let ep = eps[i];
     if (!ep) return false;
+    play?.abort();                   // 上一集还在解析：取消掉，服务端那边排队中的嗅探跟着出队
+    const sig = (play = new AbortController()).signal;
     // 先赋值再取回：$state 存的是代理，拿原对象和 cur 比永远不相等
     cur = { i, n: epNo(ep, i), name: ep.name, page: ep.url, src: null, failed: false, error: false, marked: false };
     const mine = cur;
     if (jumpOnly[pick.site]) { mine.failed = true; return false; }
     let r = null;
     try {
-      r = await api({ op: 'resolve', site: pick.site, url: ep.url, ...(fresh ? { fresh: 1 } : {}) });
+      r = await api({ op: 'resolve', site: pick.site, url: ep.url, ...(fresh ? { fresh: 1 } : {}) }, sig);
       if (cur !== mine) return false;
       if (!r.url && /过期/.test(r.error ?? '')) {
-        const again = await relink();
+        const again = await relink(sig);
         if (cur !== mine) return false;
-        if (again) { ep = again.ep; mine.i = again.i; mine.page = ep.url; r = await api({ op: 'resolve', site: pick.site, url: ep.url }); }
+        if (again) { ep = again.ep; mine.i = again.i; mine.page = ep.url; r = await api({ op: 'resolve', site: pick.site, url: ep.url }, sig); }
         if (cur !== mine) return false;
       }
       if (r.url) { mine.srSrc = r.srUrl ?? null; mine.src = r.url; return true; }
     } catch { /* 网络错误：当作这次没加载出来 */ }
-    if (cur !== mine) return false;
+    if (cur !== mine || sig.aborted) return false;   // 被取消的不算失败，也不弹错
     // 「没找到直链」连续两次才认定这个站只能跳转；超时、过期、网络错误只给「重新加载」
     const noDirect = /没找到/.test(r?.error ?? '');
     if (noDirect && (misses[pick.site] = (misses[pick.site] ?? 0) + 1) >= 2) { mine.failed = true; jumpOnly[pick.site] = true; }
@@ -281,18 +284,10 @@
   const hasNext = $derived(!!cur && cur.i < eps.length - 1);
   const go = (d) => { if (cur) playAt(cur.i + d); };
 
-  /**
-   * 各站实际清晰度：播过一次就记下 videoHeight（1080 → 「1080p」），换片源时一眼看出哪家清楚。
-   * 存在本机浏览器 —— 只是给主人自己看的参考，丢了下次播放又会记上
-   */
-  const QKEY = 'j-anime.sourceQuality';
+  /** 各站实际清晰度：播过一次就记下 videoHeight（1080 → 「1080p」），换片源时一眼看出哪家清楚（存本机，见 watchUtil.js） */
   let quality = $state({});
-  $effect(() => { try { quality = JSON.parse(localStorage.getItem(QKEY) ?? '{}'); } catch { /* 隐私模式 */ } });
-  function onMeta(h) {
-    if (!pick || !h) return;
-    quality = { ...quality, [pick.site]: h };
-    try { localStorage.setItem(QKEY, JSON.stringify(quality)); } catch { /* 隐私模式 */ }
-  }
+  $effect(() => { quality = loadQuality(); });
+  function onMeta(h) { if (pick && h) saveQuality(quality = { ...quality, [pick.site]: h }); }
   /** 片源站给的名字和这部番同名（忽略空格 / 标点）就不再写一遍 */
   const sameName = (x) => { const k = (t) => String(t ?? '').replace(/[\s\p{P}]/gu, ''); return k(x) === k(dispTitle(a)); };
 

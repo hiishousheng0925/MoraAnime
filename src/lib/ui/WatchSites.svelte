@@ -5,6 +5,7 @@
    * 只存模板、只生成链接：站里不请求这些网址、不解析对方页面。
    */
   import { invalidateAll } from '$app/navigation';
+  import { post } from '$lib/api.js';
   import Group from './SettingsGroup.svelte';
   import InfoTip from '$lib/ui/InfoTip.svelte';
   import { PRIMARY } from './btn.js';
@@ -20,13 +21,12 @@
   let editName = $state('');
   let editUrl = $state('');
 
+  /** 失败返回 null 并 toast —— 原来启用 / 排序 / 删除这几个按钮出错时一点反应都没有 */
   async function api(body) {
     busy = true;
-    try {
-      return await fetch('/api/watch-sites', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-        .then((r) => r.json());
-    } finally { busy = false; await invalidateAll(); }
+    try { return await post('/api/watch-sites', body); }
+    catch (e) { toast.error(e); return null; }
+    finally { busy = false; await invalidateAll(); }
   }
 
   /** 不合法的网址在本地就挡掉，不跑一趟服务端 —— 服务端那道校验照样在 */
@@ -38,8 +38,7 @@
     // TypeError，在 async 里被吞成 unhandledrejection：点了完全没反应。
     // lint-arch 规则 15b 盯着这个写法。
     if (bad) return toast.error(bad);
-    const r = await api({ name, url });
-    if (r?.error) return toast.error(r.error);
+    if (!(await api({ name, url }))) return;
     name = ''; url = '';
   }
 
@@ -47,8 +46,7 @@
   async function saveEdit() {
     const bad = badUrl(editUrl);
     if (bad) return toast.error(bad);
-    const r = await api({ op: 'edit', id: editId, name: editName, url: editUrl });
-    if (r?.error) return toast.error(r.error);
+    if (!(await api({ op: 'edit', id: editId, name: editName, url: editUrl }))) return;
     editId = null;
   }
 

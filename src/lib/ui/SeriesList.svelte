@@ -11,6 +11,8 @@
   import { TYPE_CN, WATCH_STATUS, SEASON_CN } from '$lib/constants.js';
   import { dispTitle, yearText } from '$lib/format.js';
   import { invalidateAll } from '$app/navigation';
+  import { post } from '$lib/api.js';
+  import { toast } from '$lib/toast.svelte.js';
   import { page } from '$app/state';
   let { items = [], currentId = null, franchise = null, hasCustomOrder = false } = $props();
 
@@ -18,11 +20,12 @@
   let editOrder = $state(false);
   let busy = $state(false);
 
+  // try/finally：原来请求一抛错 busy 就永远是 true，上移下移按钮全部卡在禁用
   async function order(id, op) {
     busy = true;
-    await fetch('/api/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, op }) });
-    busy = false;
+    try { await post('/api/order', { id, op }); }
+    catch (e) { toast.error(e); }
+    finally { busy = false; }
     await invalidateAll();
   }
   const skippable = $derived(items.filter((r) => r.is_skippable).length);

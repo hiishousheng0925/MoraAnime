@@ -41,6 +41,18 @@ export const MY_STATUS_BADGE = {
   on_hold:   'bg-black/70 text-slate-300',
   dropped:   'bg-black/70 text-slate-300'
 };
+/**
+ * 列表行里「我的状态」小标签（排行榜行、快速搜索结果）—— 不压在封面上，所以用淡底而不是 MY_STATUS_BADGE 的黑底。
+ * 两处原来各写一份，「想看」一处是灰底一处是描边。取描边：想看还没开始，和在看 / 看完的实色底拉开；
+ * 搁置 / 弃番压成弱色，不和想看混在一起。
+ */
+export const MY_STATUS_TAG = {
+  watching:  'bg-accent/15 text-accent-ink',
+  completed: 'bg-live/15 text-live-ink',
+  plan:      'ring-1 ring-inset ring-ink-600 text-ink-200',
+  on_hold:   'bg-ink-800 text-ink-400',
+  dropped:   'bg-ink-800 text-ink-400'
+};
 export const STATUS_TONE = {
   ONGOING:  'bg-sky-700 text-white',
   UPCOMING: 'bg-violet-700 text-white',
@@ -93,10 +105,8 @@ export const MINE_TABS = [
   ['active', '全部'], ['plan', '想看'], ['watching', '在看'],
   ['completed', '看完'], ['on_hold', '搁置'], ['dropped', '弃番']
 ];
-export const STATUS_OPTS = ['ONGOING', 'FINISHED', 'UPCOMING'].map((v) => [v, STATUS_CN[v]]);
 /** 目录页的完结状态多选项（含「未知」—— 214 条没有任何播出信息的条目） */
 export const STATUS_OPTS_ALL = ['ONGOING', 'FINISHED', 'UPCOMING', 'UNKNOWN'].map((v) => [v, STATUS_CN[v]]);
-export const SEASON_OPTS = Object.entries(SEASON_CN);
 /** [值, 「冬季 1-3月」] —— 带月份的选项，给筛选器用 */
 export const SEASON_OPTS_M = Object.entries(SEASON_CN).map(([v, l]) => [v, `${l}季 ${SEASON_MONTHS[v]}`]);
 export const WEEKDAY_OPTS = [[1, '周一'], [2, '周二'], [3, '周三'], [4, '周四'],

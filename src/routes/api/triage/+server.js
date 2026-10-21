@@ -2,8 +2,10 @@ import { json } from '@sveltejs/kit';
 import { setTriage, triageQueue, triageStats, triageYears, nextBatchId,
          undoLastBatch, resetNotSeen } from '$lib/server/queries.js';
 import { getDb, tx } from '$lib/server/db.js';
+import { TRIAGE_VERDICTS as VALID, isId } from '$lib/server/entryRules.js';
 
-const VALID = ['seen', 'not_seen', 'never_heard', 'skipped'];
+// 一屏最多几十张；上限防止一个请求把几万行塞进同一个同步事务（整站跟着卡住）
+const MAX_ITEMS = 100;
 
 /**
  * 每个写操作都把新的队列/计数一起返回 —— 前端就地替换，不走导航。
@@ -12,7 +14,7 @@ const VALID = ['seen', 'not_seen', 'never_heard', 'skipped'];
 const view = (b) => {
   const scope = { yearMin: b.yearMin, yearMax: b.yearMax };
   return {
-    queue: triageQueue({ limit: b.limit ?? 24, ...scope }),
+    queue: triageQueue({ limit: Math.min(Math.max(Number.parseInt(b.limit, 10) || 24, 1), MAX_ITEMS), ...scope }),
     stats: triageStats(scope),
     years: triageYears()
   };
@@ -35,12 +37,13 @@ export async function POST({ request }) {
 
   // 批量提交：一屏扫完一次性写入，共用一个 batch_id 以便整批撤销
   if (Array.isArray(b.batch)) {
+    if (b.batch.length > MAX_ITEMS) return json({ error: 'batch too large' }, { status: 400 });
     const db = getDb();
     const batchId = nextBatchId();
     try {
       tx(db, () => {
         for (const it of b.batch) {
-          if (!it?.id || !VALID.includes(it.verdict)) continue;
+          if (!isId(it?.id) || !VALID.includes(it.verdict)) continue;
           setTriage(it.id, it.verdict, batchId);
         }
       });
@@ -50,7 +53,7 @@ export async function POST({ request }) {
     return json({ ok: true, batchId, ...view(b) });
   }
 
-  if (!b.id || !VALID.includes(b.verdict)) return json({ error: 'bad request' }, { status: 400 });
+  if (!isId(b.id) || !VALID.includes(b.verdict)) return json({ error: 'bad request' }, { status: 400 });
   setTriage(b.id, b.verdict, nextBatchId());
   return json({ ok: true, stats: triageStats({ yearMin: b.yearMin, yearMax: b.yearMax }), years: triageYears() });
 }

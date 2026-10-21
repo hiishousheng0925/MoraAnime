@@ -304,7 +304,7 @@
          tab 记在网址上（?tab=series）、切换用 replaceState —— 刷新停在原 tab，「← 返回」不会先退一个 tab -->
     <div role="tablist" class="mt-8 flex gap-6 border-b border-ink-700 sm:mt-10">
       {#each TABS as [k, l] (k)}
-        <button role="tab" aria-selected={tab === k} onclick={() => setTab(k)}
+        <button role="tab" id="tab-{k}" aria-selected={tab === k} aria-controls={tab === k ? 'tabpanel' : undefined} onclick={() => setTab(k)}
                 class="-mb-px border-b-2 px-0.5 pb-2.5 text-[15px] transition
                        {tab === k ? 'border-accent font-semibold text-ink-100' : 'border-transparent text-ink-400 hover:text-ink-200'}">
           {l}{#if k === 'series' && a.related?.length}<span class="ml-1.5 text-[13px] font-normal text-ink-400">{a.related.length}</span>{/if}
@@ -313,7 +313,7 @@
     </div>
 
     {#key tab}
-    <div class="tab-in" role="tabpanel">
+    <div class="tab-in" role="tabpanel" id="tabpanel" aria-labelledby="tab-{tab}">
     {#if tab === 'info'}
       {#if summary.body}
         <Section title="简介">

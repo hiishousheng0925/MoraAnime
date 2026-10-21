@@ -15,7 +15,7 @@
   const TONE_CLS = $derived({
     accent: on ? 'border-accent bg-accent/15 text-accent-ink'
                : 'border-ink-600 bg-ink-900 text-ink-200 hover:border-ink-400',
-    danger: on ? 'border-red-500/60 bg-red-500/10 text-danger'
+    danger: on ? 'border-danger/60 bg-danger/10 text-danger'
                : 'border-ink-600 bg-ink-900 text-ink-400 hover:border-ink-400',
     soft:   on ? 'border-transparent bg-accent/15 text-accent-ink'
                : 'border-transparent bg-ink-800 text-ink-200 hover:bg-ink-700 hover:text-ink-100'

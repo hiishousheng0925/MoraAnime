@@ -60,8 +60,9 @@
 
 {#snippet body()}{@render children()}{/snippet}
 
+<!-- muted 时 inert：pointer-events-none 只拦鼠标，键盘照样能 Tab 进来把面板打开 -->
 <div bind:this={root} class="relative shrink-0 {muted ? 'pointer-events-none opacity-40' : ''}"
-     aria-disabled={muted || undefined}>
+     inert={muted || undefined} aria-disabled={muted || undefined}>
   <!-- 底色和搜索框一致（bg-ink-900），否则透明胶囊看不出是可点的控件 -->
   <button type="button" onclick={() => (open = !open)} aria-expanded={open} aria-haspopup="dialog"
           class="flex items-center gap-1.5 whitespace-nowrap px-3 {BAR_BOX}

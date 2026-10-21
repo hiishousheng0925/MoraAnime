@@ -11,11 +11,12 @@
  *   node scripts/dev.js --fresh      # 重新复制，丢掉 dev.db 里的改动
  *   node scripts/dev.js --live       # 明确要连正式库（排查线上数据时才用）
  */
-import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, statSync, unlinkSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { DATA_DIR } from '../src/lib/server/paths.js';
 import { VITE_BIN } from './platform.js';
+import { copyDbSnapshot } from './site.js';
 
 const PROD_DB = join(DATA_DIR, 'j-anime.db');
 const DEV_DB = join(DATA_DIR, 'dev.db');
@@ -35,12 +36,9 @@ if (live) {
     console.log('🧹 已删除旧的 dev.db');
   }
   if (!existsSync(DEV_DB)) {
-    // WAL 里可能有未合并的数据，先 checkpoint 再复制，否则副本会缺最近的写入
-    spawnSync(process.execPath, ['-e', `
-      const { DatabaseSync } = require('node:sqlite');
-      new DatabaseSync(${JSON.stringify(PROD_DB)}).exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    `], { stdio: 'ignore' });
-    copyFileSync(PROD_DB, DEV_DB);
+    // 只读连接 + VACUUM INTO（和 npm test、发布自检同一个 copyDbSnapshot）：原来先 checkpoint 再复制文件 ——
+    // checkpoint 本身是对正式库的一次写，正式站同时在写时复制出来的文件还可能是撕裂的（2026-10-21 审核）
+    await copyDbSnapshot(PROD_DB, DEV_DB);
     console.log(`📋 已从正式库复制 dev.db (${(statSync(DEV_DB).size / 1048576).toFixed(0)} MB)`);
   } else {
     console.log(`📦 用现有 dev.db（想拿正式库最新数据跑 npm run dev:fresh）`);
