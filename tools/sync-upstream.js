@@ -88,6 +88,20 @@ const patch = join(tmp, 'upstream.patch');
 try {
   // --full-index：--3way 要靠完整的 blob id 找到原版本做三方合并
   writeFileSync(patch, git(UP, ['diff', '--binary', '--full-index', '--no-renames', `${from}..${to}`, ...pathspec]).stdout);
+  // 本仓库是全新历史，没有上游的 blob：先把每个改动文件在 from / to 两个版本的内容写进本仓库对象库
+  // （hash-object -w，内容寻址、id 和上游一致），--3way 才找得到原版本做三方合并。对上游仍然只读（cat-file）
+  let imported = 0;
+  for (const line of files) {
+    const path = line.split('\t').pop();
+    for (const rev of [from, to]) {
+      const blob = spawnSync('git', ['-C', UP, 'cat-file', 'blob', `${rev}:${path}`], { maxBuffer: 512 * 1024 * 1024 });
+      if (blob.status !== 0) continue;   // 新增 / 删除的文件，那一侧本来就没有
+      const w = spawnSync('git', ['-C', ROOT, 'hash-object', '-w', '--stdin'], { input: blob.stdout, encoding: 'utf8' });
+      if (w.status !== 0) throw new Error(`写入 blob 失败：${path}@${rev} ${w.stderr}`);
+      imported++;
+    }
+  }
+  console.log(`   导入上游 blob ${imported} 个（三方合并用）`);
   const ap = spawnSync('git', ['-C', ROOT, 'apply', '--3way', '--index', '--whitespace=nowarn', patch], { encoding: 'utf8' });
   const conflicts = git(ROOT, ['diff', '--name-only', '--diff-filter=U']).stdout.trim();
   if (ap.status !== 0 || conflicts) {
