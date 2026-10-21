@@ -312,7 +312,15 @@ async function checkAppUpdate() {
     au.autoDownload = true;
     au.autoInstallOnAppQuit = true;
     au.on('error', (e) => log('[updater] 检查更新失败（静默）', String(e?.message || e)));
-    au.on('update-downloaded', (info) => log(`[updater] 新版本 ${info.version} 已下载，退出时安装`));
+    // 只靠「退出时安装」的话，用户关掉再打开看到的还是旧版（退出后要在后台装十几秒），会以为没更新（2026-10-21 主人实测）。
+    // 所以下载完直接问：立即重启 → 静默安装并自动重新打开；稍后 → 照旧退出时安装
+    au.on('update-downloaded', async (info) => {
+      log(`[updater] 新版本 ${info.version} 已下载`);
+      const r = await dialog.showMessageBox(mainWin && !mainWin.isDestroyed() ? mainWin : undefined, {
+        type: 'info', title: 'MoraAnime', message: `新版本 ${info.version} 已就绪`, detail: '重启后生效',
+        buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1, noLink: true });
+      if (r.response === 0) { log('[updater] 立即重启安装'); setImmediate(() => au.quitAndInstall(true, true)); }
+    });
     await au.checkForUpdates().catch((e) => log('[updater] 检查更新失败（静默）', String(e?.message || e)));
   } catch (e) {
     log('[updater] 不可用', String(e?.message || e));
