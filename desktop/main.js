@@ -301,30 +301,105 @@ function createWindow(origin) {
 }
 
 // ── 应用更新（electron-updater → GitHub Releases）───────────────
+// 每次启动查一次；有新版本就弹窗：版本号 + 几行更新内容（desktop/release-notes.json，打包时写进 latest.yml）。
+//   立即更新 → 下载（任务栏进度）→ 静默安装并自动重新打开
+//   关闭     → 这次不更新；不在退出时偷偷装，下次打开照样再弹（主人 2026-10-21 定的）
+// 原来是后台下载完才问「立即重启 / 稍后」、稍后就退出时静默装 —— 用户看不到更新了什么，关掉也照样被装上。
+// 便携版没法原地更新：「立即更新」打开最新便携版的下载链接。
+// MORA_UPDATE_URL：测试用，改从这个地址（generic 源）读 latest.yml
+const DOWNLOAD = 'https://github.com/hiishousheng0925/MoraAnime/releases/latest/download/';
+
+/** latest.yml 里的 releaseNotes（字符串；拿不到时 GitHub 源会退回 release 正文的 HTML）→ 最多 6 行纯文本 */
+function notesList(n) {
+  if (Array.isArray(n)) n = n[0]?.note ?? '';
+  return String(n ?? '').replace(/<br\s*\/?>|<\/(p|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')
+    .split(/\r?\n/).map((l) => l.replace(/^[•\-*]\s*/, '').trim()).filter(Boolean).slice(0, 6);
+}
+
 async function checkAppUpdate() {
-  // 便携版没法原地更新；开发运行也不查。还没发布过的时候查不到，静默
-  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_DIR || process.env.MORA_NO_UPDATE === '1') return;
+  const feed = process.env.MORA_UPDATE_URL;
+  if ((!app.isPackaged && !feed) || process.env.MORA_NO_UPDATE === '1') return;
+  const portable = !!process.env.PORTABLE_EXECUTABLE_DIR;
   try {
     const { default: updater } = await import('electron-updater');
     const au = updater.autoUpdater;
     au.logger = { info: (m) => log('[updater]', String(m)), warn: (m) => log('[updater]', String(m)),
                   error: (m) => log('[updater]', String(m)), debug: () => {} };
-    au.autoDownload = true;
-    au.autoInstallOnAppQuit = true;
-    au.on('error', (e) => log('[updater] 检查更新失败（静默）', String(e?.message || e)));
-    // 只靠「退出时安装」的话，用户关掉再打开看到的还是旧版（退出后要在后台装十几秒），会以为没更新（2026-10-21 主人实测）。
-    // 所以下载完直接问：立即重启 → 静默安装并自动重新打开；稍后 → 照旧退出时安装
-    au.on('update-downloaded', async (info) => {
-      log(`[updater] 新版本 ${info.version} 已下载`);
-      const r = await dialog.showMessageBox(mainWin && !mainWin.isDestroyed() ? mainWin : undefined, {
-        type: 'info', title: 'MoraAnime', message: `新版本 ${info.version} 已就绪`, detail: '重启后生效',
-        buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1, noLink: true });
-      if (r.response === 0) { log('[updater] 立即重启安装'); setImmediate(() => au.quitAndInstall(true, true)); }
-    });
+    au.autoDownload = false;
+    au.autoInstallOnAppQuit = false;
+    if (feed) { au.forceDevUpdateConfig = true; au.setFeedURL({ provider: 'generic', url: feed }); }
+    au.on('error', (e) => log('[updater] 出错', String(e?.message || e)));
+    au.once('update-available', (info) => promptUpdate(au, info, portable));
     await au.checkForUpdates().catch((e) => log('[updater] 检查更新失败（静默）', String(e?.message || e)));
   } catch (e) {
     log('[updater] 不可用', String(e?.message || e));
   }
+}
+
+// 弹窗跟着客户端当前主题走：从主窗口读 --c-* 变量传给 update.html
+const THEME_VARS = ['--c-bg', '--c-surface', '--c-surface-2', '--c-border', '--c-text', '--c-text-soft',
+  '--c-muted', '--c-accent', '--c-on-accent', '--c-danger'];
+
+/**
+ * 客户端样式的更新弹窗（desktop/update.html）：透明窗口盖住主窗口 = 遮罩 + 居中卡片。
+ * 主人 2026-10-21：不要 Windows 原生弹窗（「很丑」），要和客户端的 UI 一致。
+ * 页面按钮改 location.hash（#now / #later / #web），这里监听 did-navigate-in-page；进度用 executeJavaScript 推过去
+ */
+async function promptUpdate(au, info, portable) {
+  const win = mainWin && !mainWin.isDestroyed() ? mainWin : null;
+  if (!win) return;
+  log(`[updater] 有新版本 ${info.version}，弹窗`);
+  const theme = await win.webContents.executeJavaScript(
+    `(() => { const s = getComputedStyle(document.documentElement);
+       return Object.fromEntries(${JSON.stringify(THEME_VARS)}.map((k) => [k, s.getPropertyValue(k).trim()])); })()`)
+    .catch(() => ({}));
+  const b = win.getContentBounds();
+  const dlg = new BrowserWindow({ parent: win, modal: true, frame: false, transparent: true, hasShadow: false,
+    resizable: false, movable: false, minimizable: false, maximizable: false, skipTaskbar: true, show: false,
+    x: b.x, y: b.y, width: b.width, height: b.height, title: 'MoraAnime 更新',
+    webPreferences: { sandbox: true, contextIsolation: true, spellcheck: false } });
+  dlg.setMenu(null);
+  dlg.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  dlg.webContents.on('will-navigate', (e) => e.preventDefault());
+  const run = (js) => { if (!dlg.isDestroyed()) dlg.webContents.executeJavaScript(js).catch(() => {}); };
+  const link = DOWNLOAD + (portable ? 'MoraAnime-portable.exe' : 'MoraAnime-Setup.exe');
+
+  let downloading = false;
+  const download = () => {
+    if (downloading) return;
+    downloading = true;
+    log('[updater] 用户选择立即更新，开始下载');
+    run('progress(0)');
+    au.on('download-progress', (p) => {
+      run(`progress(${p.percent})`);
+      if (!win.isDestroyed()) win.setProgressBar(p.percent / 100);
+    });
+    au.once('update-downloaded', () => {
+      log('[updater] 下载完成，安装并重启');
+      run('progress(100)');
+      setTimeout(() => au.quitAndInstall(true, true), 800);
+    });
+    au.downloadUpdate().catch((e) => {
+      const msg = String(e?.message || e).slice(0, 200);
+      log('[updater] 下载失败', msg);
+      downloading = false;
+      if (!win.isDestroyed()) win.setProgressBar(-1);
+      run(`failed(${JSON.stringify(msg)})`);
+    });
+  };
+  dlg.webContents.on('did-navigate-in-page', (_e, url) => {
+    const a = new URL(url).hash.slice(1).split('-')[0];
+    if (a === 'later') { log('[updater] 用户关闭了更新弹窗，下次启动再提示'); dlg.close(); }
+    else if (a === 'web') { shell.openExternal(link); dlg.close(); }
+    else if (a === 'now') {
+      if (portable) { log('[updater] 便携版：打开下载链接'); shell.openExternal(link); dlg.close(); }
+      else download();
+    }
+  });
+  await dlg.loadFile(join(HERE, 'update.html'));
+  run(`init(${JSON.stringify({ version: info.version, current: app.getVersion(), notes: notesList(info.releaseNotes), theme })})`);
+  dlg.show();
+  dlg.focus();
 }
 
 // ── 主流程 ─────────────────────────────────────────────────

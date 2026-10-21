@@ -30,6 +30,8 @@ const has = (f) => args.includes(f);
 const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const deskPkg = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
 const VERSION = deskPkg.version;
+// 更新弹窗里显示的那几行（main.js 的 promptUpdate）：打包时写进 latest.yml 的 releaseNotes。每个版本都要写，没写就不让打包
+const NOTES = JSON.parse(readFileSync(join(HERE, 'release-notes.json'), 'utf8'))[VERSION];
 const t0 = Date.now();
 const step = (m) => console.log(`\n▶ ${m}（${((Date.now() - t0) / 1000).toFixed(0)}s）`);
 
@@ -54,7 +56,7 @@ snapshotSync(ROOT, BUILD);
 step('主进程代码 + package.json');
 rmSync(join(STAGE, 'desktop'), { recursive: true, force: true });
 mkdirSync(join(STAGE, 'desktop'), { recursive: true });
-for (const f of ['main.js', 'catalog.js', 'db-tasks.js', 'catalog-tables.js', 'guard.mjs'])
+for (const f of ['main.js', 'catalog.js', 'db-tasks.js', 'catalog-tables.js', 'guard.mjs', 'update.html'])
   cpSync(join(HERE, f), join(STAGE, 'desktop', f));
 cpSync(join(HERE, 'assets'), join(STAGE, 'desktop', 'assets'), { recursive: true });
 
@@ -113,6 +115,7 @@ if (has('--run')) {
 
 // ── 4. 打包 ───────────────────────────────────────────────
 if (has('--dist')) {
+  if (!Array.isArray(NOTES) || !NOTES.length) { console.error(`❌ desktop/release-notes.json 里没有 ${VERSION} 的更新内容`); process.exit(1); }
   step('electron-builder：NSIS 安装包 + 便携版');
   const { build, Platform, Arch } = await import('electron-builder');
   const electronVersion = JSON.parse(readFileSync(join(HERE, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
@@ -142,7 +145,8 @@ if (has('--dist')) {
       },
       portable: { artifactName: '${productName}-${version}-portable.${ext}' },
       // 自动更新：electron-updater 读 GitHub Releases（还没发布时检查失败是静默的，见 main.js）
-      publish: [{ provider: 'github', owner: 'hiishousheng0925', repo: 'MoraAnime', releaseType: 'release' }]
+      publish: [{ provider: 'github', owner: 'hiishousheng0925', repo: 'MoraAnime', releaseType: 'release' }],
+      releaseInfo: { releaseNotes: NOTES.join('\n') }
     }
   });
   for (const f of readdirSync(DIST).filter((x) => /\.(exe|yml|blockmap)$/.test(x)))

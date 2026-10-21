@@ -143,6 +143,9 @@ node desktop/build.js --dist     # NSIS 安装包 + 便携版 → desktop/dist/�
   phosphor-svelte / anime4k-webgpu 已打进前端包
 - `asar: false`：服务子进程（ELECTRON_RUN_AS_NODE）要用真实文件系统读 build/ 和 node_modules/
 - 自动更新：electron-updater，GitHub provider（owner `hiishousheng0925`、repo `MoraAnime`）；发版时要连 `latest.yml` 一起传
+- **更新弹窗**（2026-10-21 主人定的）：每次启动查一次，有新版本就弹客户端样式的弹窗（`desktop/update.html`，不用 Windows 原生对话框）：版本号 + 几行更新内容，「立即更新」= 下载并自动重启安装，「关闭」= 这次不更新、**下次打开还弹**（不在退出时偷偷装）。便携版的「立即更新」打开下载链接
+- **发版**：改 `desktop/package.json` 的 version → 在 `desktop/release-notes.json` 写这一版的更新内容（3–5 行、一句话一条，没写打包会失败）→ `node desktop/build.js --dist` → e2e → `node tools/publish-release.js`（同一份更新内容也写进 release 正文；另传不带版本号的 `MoraAnime-Setup.exe`，固定链接永远是最新版）
+- 测试弹窗：`MORA_UPDATE_URL=<本地 generic 源>` 让客户端改从那里读 `latest.yml`（假的高版本 + 错的 sha512 = 能走完「弹窗 → 关闭 → 再弹 → 立即更新 → 下载失败」而不会真的安装）
 - 体积：安装包 / 便携版各约 107 MB，安装后约 350 MB（Electron 本体占大头）
 
 **实测**：
