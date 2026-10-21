@@ -17,7 +17,8 @@ import { mp4Target } from './sources/stream.js';
 import { assertPublic } from './sources/scrape.js';
 import { limiter } from './sources/limit.js';
 
-export const DEFAULT_SHOT_DIR = join(homedir(), 'Pictures', 'j-anime');
+// 缺省文件夹名跟品牌走：桌面客户端是「图片\MoraAnime」（2026-10-22 审查）
+export const DEFAULT_SHOT_DIR = join(homedir(), 'Pictures', process.env.J_ANIME_BRAND || 'j-anime');
 export const shotDir = () => {
   const d = getSetting('screenshot_dir', '');
   return d && isAbsolute(d) ? d : DEFAULT_SHOT_DIR;

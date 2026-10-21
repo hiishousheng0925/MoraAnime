@@ -83,7 +83,7 @@
     ['个人', [['account', '账号', !desk], ['backup', '备份与恢复', !!user], ['look', '外观', true], ['years', '显示年份', true],
               ['filter', '内容过滤', true], ['share', '分享番单', !!user && !desk], ['saved', '保存的筛选', !!user && data.filters.length > 0]]],
     [desk ? '其他' : admin ? '站点管理' : '站点', [['members', '注册白名单', admin && !desk], ['shots', '截图', admin], ['sites', '观看站', admin],
-              ['stats', '数据', true], ['sources', '数据来源', true]]]
+              ['stats', '数据', !desk], ['sources', '数据来源', true]]]
   ].map(([g, xs]) => [g, xs.filter((x) => x[2])]));
 
   /**
@@ -278,7 +278,9 @@
 
     {#if admin}<WatchSites sites={data.watchSites} />{/if}
 
-    <!-- 数据（「中文名已补」原来挂在侧栏，2026-10 起只在这里 —— 访客不该在侧栏看到运维数字） -->
+    <!-- 数据（「中文名已补」原来挂在侧栏，2026-10 起只在这里 —— 访客不该在侧栏看到运维数字）。
+         桌面客户端不显示：那是站主那边的同步日志和补数据进度，客户端用户既看不懂也处理不了（2026-10-22 审查） -->
+    {#if !desk}
     <Group id="stats" title="数据">
       <div class="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3.5 sm:grid-cols-4">
         {#each STATS as [k, v]}
@@ -323,6 +325,7 @@
         {/each}
       </div>
     </Group>
+    {/if}
 
     <!-- 数据来源 —— AOD 是 ODbL 许可，署名与「说明修改」是许可要求，不是客套 -->
     <Group id="sources" title="数据来源">
@@ -347,7 +350,7 @@
         </div>
         <!-- lint-copy-ok: ODbL 要求公开站说明对原始数据做了哪些修改，这段是许可义务不是使用说明 -->
         <div>
-          本站对原始数据所做的修改：合并重复条目、按播出日期重推完结状态、
+          {desk ? '本应用' : '本站'}对原始数据所做的修改：合并重复条目、按播出日期重推完结状态、
           归一制作公司名、中文分词建立搜索索引、按标签聚合中文题材、与 Bangumi 条目逐季对应。
         </div>
       </div>

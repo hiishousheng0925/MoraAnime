@@ -36,7 +36,7 @@ export async function POST({ request, locals }) {
     // 存的是服务器那台电脑上的路径：只有管理员能改（其他账号的截图下载到自己设备）
     if (locals.user?.role !== 'admin') return json({ error: '只有管理员能改' }, { status: 403 });
     const v = String(b.value ?? '').trim();
-    if (v && (!isAbsolute(v) || v.length > 260 || /(^|[\\/])\.\.([\\/]|$)/.test(v))) return json({ error: '要填这台电脑上的完整路径，比如 D:\\图片\\j-anime' }, { status: 400 });
+    if (v && (!isAbsolute(v) || v.length > 260 || /(^|[\\/])\.\.([\\/]|$)/.test(v))) return json({ error: '要填这台电脑上的完整路径，比如 D:\\图片\\截图' }, { status: 400 });
     if (v) { try { await mkdir(v, { recursive: true }); } catch (e) { return json({ error: `建不了这个文件夹：${e.message}` }, { status: 400 }); } }
     setSetting('screenshot_dir', v);
     return json({ ok: true, key: b.key, value: shotDir() });

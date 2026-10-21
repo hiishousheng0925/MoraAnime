@@ -223,8 +223,9 @@
     {/each}
   {:else}
     <div class="w-56 px-3 py-2 text-[12px] leading-relaxed text-white/80">
-      超分要用 https 地址打开
-      {#if httpsUrl}<a href={httpsUrl} class="mt-1.5 block rounded-md bg-accent px-2.5 py-1.5 text-center font-medium text-on-accent">切到 https 地址</a>{/if}
+      <!-- 已经是安全上下文（https、桌面客户端的本机地址）还不行 = 显卡 / 驱动不支持 WebGPU，别再叫人切 https（2026-10-22 审查） -->
+      {globalThis.isSecureContext ? '这台设备的显卡不支持超分' : '超分要用 https 地址打开'}
+      {#if httpsUrl && !globalThis.isSecureContext}<a href={httpsUrl} class="mt-1.5 block rounded-md bg-accent px-2.5 py-1.5 text-center font-medium text-on-accent">切到 https 地址</a>{/if}
     </div>
   {/if}
 {/snippet}

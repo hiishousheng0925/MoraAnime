@@ -22,6 +22,9 @@ export const authDialog = {
 
 /** 弹登录框；登录 / 注册成功 resolve(true)，关掉 resolve(false)。同时多处等待的一起放行 */
 export function requireLogin(m = 'login') {
+  // 桌面客户端：内置账号的密码是随机的，弹登录框用户也登不进去（2026-10-22 审查）。
+  // 会话失效时让主进程重新建会话并刷新页面（preload 的 window.mora.relogin）
+  if (typeof window !== 'undefined' && window.mora?.relogin) return window.mora.relogin().then(Boolean).catch(() => false);
   mode = m; open = true;
   return new Promise((resolve) => waiters.push(resolve));
 }

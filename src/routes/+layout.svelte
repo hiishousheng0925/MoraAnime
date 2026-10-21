@@ -6,7 +6,8 @@
   import '../app.css';
   import { page, navigating, updated } from '$app/state';
   import { beforeNavigate } from '$app/navigation';
-  import { browser } from '$app/environment';
+  import { browser, dev } from '$app/environment';
+  import { onMount } from 'svelte';
   import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
   import Toaster from '$lib/ui/Toaster.svelte';
   import AuthDialog from '$lib/ui/AuthDialog.svelte';
@@ -85,6 +86,12 @@
   const brand = $derived(data.brand ?? 'j-anime');
 
   const user = $derived(data.user);
+  // service worker 手动注册（svelte.config.js 关了自动注册，原因见那里）：桌面客户端顺手注销以前装过的
+  onMount(() => {
+    if (!('serviceWorker' in navigator)) return;
+    if (data.desktop) navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    else navigator.serviceWorker.register('/service-worker.js', { type: dev ? 'module' : 'classic' }).catch(() => {});
+  });
   /** 旧书签 /login、或别处带 ?login=1 跳来的：弹登录框，并把参数从地址栏去掉 */
   $effect(() => {
     if (!page.url.searchParams.has('login')) return;
@@ -268,8 +275,9 @@
       {/if}
       <div class="row flex items-center gap-2">
         {#if data.desktop}
-          <!-- 桌面客户端单机免登录：内置账号（me）只是个技术细节，不显示头像 / 用户名（主人 2026-10-21） -->
-          <span class="flex-1"></span>
+          <!-- 桌面客户端单机免登录：内置账号（me）只是个技术细节，不显示头像 / 用户名（主人 2026-10-21）；
+               这一行放客户端名和版本号，不然只剩一个亮暗按钮孤零零挂在右边（主人 2026-10-22） -->
+          <span class="lbl min-w-0 flex-1 truncate px-1 text-[12.5px] font-medium text-ink-200">{brand}{#if data.appVersion}<span class="ml-1.5 font-normal tabular-nums text-ink-400">{data.appVersion}</span>{/if}</span>
         {:else if user}
           <a href="/settings#account" data-sveltekit-reload title="账号设置"
              class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 hover:bg-ink-800">

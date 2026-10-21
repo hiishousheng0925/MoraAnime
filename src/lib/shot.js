@@ -11,7 +11,7 @@ import { toast } from './toast.svelte.js';
 export function shotName(title, ep, t) {
   const s = Math.max(0, Math.floor(t || 0));
   const mm = String(Math.floor(s / 60)).padStart(2, '0'), ss = String(s % 60).padStart(2, '0');
-  const name = String(title ?? '').replace(/[\\/:*?"<>|\r\n\t]+/g, ' ').trim().slice(0, 80) || 'j-anime';
+  const name = String(title ?? '').replace(/[\\/:*?"<>|\r\n\t]+/g, ' ').trim().slice(0, 80) || '截图';
   return `${name}${ep ? ` 第${ep}集` : ''} ${mm}-${ss}.png`;
 }
 

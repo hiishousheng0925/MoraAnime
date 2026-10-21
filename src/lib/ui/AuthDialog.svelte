@@ -68,7 +68,7 @@
   <div class="flex items-center gap-2.5 {mobile ? 'pt-1' : ''}">
     <BrandMark size={30} test={isTest} />
     <div class="min-w-0">
-      <div class="text-[12px] font-medium tracking-wide text-ink-400">j-anime</div>
+      <div class="text-[12px] font-medium tracking-wide text-ink-400">{page.data?.brand ?? 'j-anime'}</div>
       <h2 id="auth-title" class="text-[18px] font-semibold leading-tight">{reg ? '注册' : '登录'}</h2>
     </div>
     {#if !mobile}

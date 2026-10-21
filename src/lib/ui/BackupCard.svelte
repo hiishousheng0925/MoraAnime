@@ -3,6 +3,7 @@
   import { PRIMARY, SECONDARY } from './btn.js';
   import Confirm from '$lib/ui/Confirm.svelte';
   import { toast } from '$lib/toast.svelte.js';
+  import { post } from '$lib/api.js';
   import { invalidateAll } from '$app/navigation';
   let { total = 0 } = $props();
 
@@ -34,10 +35,8 @@
     pending = null;
     busy = true;
     try {
-      const r = await fetch('/api/import', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload, replace: replaceMode }) }).then((x) => x.json());
-      if (r.error) { toast.error(r.error); return; }
+      // 走 post()：413（文件太大）/ 500 这类非 JSON 响应原来直接 x.json() 炸成「Unexpected token …」（2026-10-22 审查）
+      const r = await post('/api/import', { payload, replace: replaceMode });
       // 整站备份里认不出当前账号（用户名、id 都对不上）：原来静默恢复 0 条
       if (r.missingAccount && !r.entries && !r.triage) toast.error('备份里没有这个账号的记录');
       else toast.ok(`已恢复 ${r.entries} 条番单 · ${r.triage} 条标记` +

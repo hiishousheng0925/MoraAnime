@@ -45,6 +45,11 @@ export default {
      * 5 分钟：发布不频繁，这个间隔的请求量可以忽略。
      */
     version: { pollInterval: 300_000 },
+    /**
+     * service worker 改成在根布局里手动注册：网站注册（离线兜底，#53），桌面客户端（data.desktop）不注册 ——
+     * 本机服务谈不上离线，原来客户端每个随机端口各装一份、预缓存整个构建 + 封面，旧的永不清理（2026-10-22 审查：用户机上已 90MB）
+     */
+    serviceWorker: { register: false },
     csrf: { trustedOrigins: trustedOrigins() }
   }
 };

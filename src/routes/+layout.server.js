@@ -24,6 +24,8 @@ const ENV = process.env.J_ANIME_STAGING === '1' ? 'test' : 'prod';
 const BRAND = process.env.J_ANIME_BRAND || 'j-anime';
 /** 桌面客户端（MoraAnime，单机单用户、免登录）：隐藏账号 / 注册白名单 / 分享 / 登出。网站不设 */
 const DESKTOP = process.env.J_ANIME_DESKTOP === '1';
+/** 客户端版本号（MoraAnime 主进程传进来），显示在侧栏左下角；网站不设 */
+const APP_VERSION = DESKTOP ? process.env.J_ANIME_APP_VERSION || null : null;
 
 export function load({ url, cookies, depends, locals }) {
   /**
@@ -37,7 +39,7 @@ export function load({ url, cookies, depends, locals }) {
   depends('app:stats');
   const drawerOpen = cookies.get(DRAWER_COOKIE) !== '0';   // 缺省 = 展开
   if (isBare(url.pathname))
-    return { env: ENV, brand: BRAND, desktop: DESKTOP, bare: true, drawerOpen, user: null, stats: {}, triage: {}, gateCovers: [], hideNsfw: false };
+    return { env: ENV, brand: BRAND, desktop: DESKTOP, appVersion: APP_VERSION, bare: true, drawerOpen, user: null, stats: {}, triage: {}, gateCovers: [], hideNsfw: false };
   // 当前账号（多账号，2026-10-19）：只给前端要用的几项。访客 = null，侧栏不显示个人统计
   const u = locals.user;
   const user = u ? { id: u.id, username: u.username, email: u.email, role: u.role } : null;
@@ -50,6 +52,6 @@ export function load({ url, cookies, depends, locals }) {
   const gateCovers = user ? [] : memoByDb('layout:gateCovers', () => getDb().prepare(
     `SELECT id FROM anime WHERE is_stub = 0 AND is_nsfw = 0 AND cover_dead = 0 AND cover_local_path IS NOT NULL
      ORDER BY bgm_collection DESC LIMIT 24`).all().map((r) => r.id));
-  return { env: ENV, brand: BRAND, desktop: DESKTOP, bare: false, drawerOpen, user, stats: user ? myStats() : {}, triage: user ? triageStats() : {}, gateCovers,
+  return { env: ENV, brand: BRAND, desktop: DESKTOP, appVersion: APP_VERSION, bare: false, drawerOpen, user, stats: user ? myStats() : {}, triage: user ? triageStats() : {}, gateCovers,
            hideNsfw: hideNsfw() };
 }
