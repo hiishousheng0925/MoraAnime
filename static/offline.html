@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0d12" />
+  <title>离线 · j-anime</title>
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('j-anime.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}</script>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <!-- 断网且这一页没被缓存过时由 service worker 给出（src/service-worker.js）。不依赖任何外部资源 -->
+  <style>
+    :root { --bg: #0a0c12; --surface: #181d29; --border: #313a4d; --muted: #8f9aad; --text: #e8ecf3; --accent: #7c9cff; --on: #0a0c12; }
+    /* 和站点同一个开关（localStorage 'j-anime.theme'，缺省暗色，不跟随系统），见 src/app.html */
+    :root[data-theme="light"] { --bg: #e9ecf1; --surface: #fff; --border: #d3d9e3; --muted: #667085; --text: #10141c; --accent: #3f62d9; --on: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 16px;
+           background: var(--bg); color: var(--text); font: 14px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .card { width: 100%; max-width: 22rem; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; text-align: center; }
+    h1 { margin: 0 0 4px; font-size: 17px; }
+    p { margin: 0; color: var(--muted); font-size: 13px; }
+    button { margin-top: 16px; width: 100%; border: 0; border-radius: 10px; padding: 10px; background: var(--accent); color: var(--on); font: inherit; font-weight: 600; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>网络不可用</h1>
+    <p>这一页还没有离线副本</p>
+    <button onclick="location.reload()">重试</button>
+  </div>
+</body>
+</html>

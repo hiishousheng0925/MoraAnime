@@ -1,0 +1,25 @@
+node_modules/
+.svelte-kit/
+build/
+.env
+.env.*
+.DS_Store
+
+# ⚠️ 数据一律不进仓库：
+#   j-anime.db 192MB，且里面有个人观看记录
+#   covers/    封面缓存，能重新拉
+#   backups/   个人记录导出
+# 部署时数据放在服务器的 /var/lib/j-anime，deploy.sh 永远不碰它
+data/
+build.dev/
+build.next/
+build.prev/
+build.staging/
+data/staging.pid
+# 事故残留：曾经把一个坏掉的产物目录误提交进仓库（358 个文件）
+build.broken-*/
+
+# MoraAnime 桌面客户端的构建产物
+desktop/node_modules/
+desktop/.stage/
+desktop/dist/

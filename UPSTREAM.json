@@ -1,0 +1,14 @@
+{
+  "upstream": "j-anime",
+  "commit": "68e136466aa38fa5e65ed0b7eaf391804e973c6a",
+  "excluded": [
+    "deploy/",
+    ".claude/",
+    "CLAUDE.md",
+    "docs/",
+    "REQUIREMENTS.md",
+    "open-question.md",
+    "scripts/release.js"
+  ],
+  "note": "MoraAnime 从 j-anime 的这个提交起步；同步网站更新时 = 把 j-anime 从这个提交到新提交的差异（排除 excluded）打进来，再更新这里的 commit"
+}

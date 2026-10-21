@@ -1,0 +1,151 @@
+#!/usr/bin/env node
+/**
+ * 客户端构建 / 打包。
+ *
+ *   node desktop/build.js            组装 desktop/.stage/app（网站产物 + 迁移脚本快照 + 主进程 + 生产依赖）
+ *   node desktop/build.js --dist     组装后用 electron-builder 打 NSIS 安装包 + 便携版 → desktop/dist/
+ *   node desktop/build.js --run      组装后直接用开发依赖里的 Electron 跑起来
+ *   --skip-vite                      复用上次的网站产物（只改了 desktop/ 时省一次构建）
+ *
+ * 组装出来的 app 目录：
+ *   build/            vite build 的 adapter-node 产物（BUILD_OUT 指过来，不碰仓库根的 build/）
+ *   build/.sync/      scripts/ + src/lib/ 快照（migrate.js 和换库要用；和网站发布的快照是同一个函数拍的）
+ *   desktop/          主进程代码
+ *   node_modules/     网站 package.json 的 dependencies（版本钉成仓库根当前装的那一版）+ electron-updater
+ *   package.json      生成的（main = desktop/main.js）
+ */
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { snapshotSync } from '../scripts/snapshot.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '..');
+const STAGE = join(HERE, '.stage', 'app');
+const DIST = join(HERE, 'dist');
+const args = process.argv.slice(2);
+const has = (f) => args.includes(f);
+
+const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+const deskPkg = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
+const VERSION = deskPkg.version;
+const t0 = Date.now();
+const step = (m) => console.log(`\n▶ ${m}（${((Date.now() - t0) / 1000).toFixed(0)}s）`);
+
+function run(cmd, argv, opts = {}) {
+  const r = spawnSync(cmd, argv, { stdio: 'inherit', ...opts });
+  if (r.status !== 0) { console.error(`❌ ${cmd} ${argv.join(' ')} 失败（exit ${r.status}）`); process.exit(1); }
+}
+
+// ── 1. 网站产物 ───────────────────────────────────────────
+const BUILD = join(STAGE, 'build');
+if (!has('--skip-vite') || !existsSync(join(BUILD, 'index.js'))) {
+  step('vite build → .stage/app/build');
+  rmSync(STAGE, { recursive: true, force: true });
+  mkdirSync(STAGE, { recursive: true });
+  // TRUSTED_ORIGINS 显式置空：svelte.config.js 缺省会读本机 ~/.j-anime.env，别把构建机的地址烤进分发的产物
+  run(process.execPath, [join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build'],
+    { cwd: ROOT, env: { ...process.env, BUILD_OUT: BUILD, TRUSTED_ORIGINS: '' } });
+}
+snapshotSync(ROOT, BUILD);
+
+// ── 2. 主进程代码 ─────────────────────────────────────────
+step('主进程代码 + package.json');
+rmSync(join(STAGE, 'desktop'), { recursive: true, force: true });
+mkdirSync(join(STAGE, 'desktop'), { recursive: true });
+for (const f of ['main.js', 'catalog.js', 'db-tasks.js', 'catalog-tables.js', 'guard.mjs'])
+  cpSync(join(HERE, f), join(STAGE, 'desktop', f));
+cpSync(join(HERE, 'assets'), join(STAGE, 'desktop', 'assets'), { recursive: true });
+
+// 运行时真正要装的依赖：服务端产物里实际 import 到的那几个。phosphor-svelte / anime4k-webgpu 这类
+// 已被 vite 打进前端包（服务端产物里没有引用），装进去只是多出几千个文件、拖慢便携版每次启动时的解包
+const serverJs = [];
+const walk = (d) => { for (const f of readdirSync(d, { withFileTypes: true })) {
+  const p = join(d, f.name);
+  if (f.isDirectory()) walk(p); else if (f.name.endsWith('.js')) serverJs.push(readFileSync(p, 'utf8'));
+} };
+walk(join(BUILD, 'server')); for (const f of ['index.js', 'handler.js']) if (existsSync(join(BUILD, f))) serverJs.push(readFileSync(join(BUILD, f), 'utf8'));
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const used = (dep) => {
+  // import('x').Foo 是 JSDoc 里的类型标注，不算
+  const re = new RegExp(`(?:from\\s*|import\\s*\\(\\s*)['"]${esc(dep)}(?:/[^'"]*)?['"](?!\\s*\\)\\s*\\.)`);
+  return serverJs.some((t) => re.test(t));
+};
+const runtimeDeps = Object.keys(rootPkg.dependencies).filter(used);
+console.log(`  运行时依赖：${runtimeDeps.join(', ')}；不装（已打进前端包）：${Object.keys(rootPkg.dependencies).filter((d) => !runtimeDeps.includes(d)).join(', ') || '无'}`);
+// 版本钉成仓库根 node_modules 里实际装的那一版（和网站测过的一致）
+const pinned = Object.fromEntries(runtimeDeps.map((d) => {
+  const p = join(ROOT, 'node_modules', d, 'package.json');
+  return [d, existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')).version : rootPkg.dependencies[d]];
+}));
+const appPkg = {
+  name: 'moraanime', productName: 'MoraAnime', version: VERSION,
+  description: deskPkg.description, author: deskPkg.author, license: deskPkg.license,
+  type: 'module', main: 'desktop/main.js',
+  engines: rootPkg.engines,
+  dependencies: { ...pinned, ...deskPkg.appDependencies }
+};
+writeFileSync(join(STAGE, 'package.json'), JSON.stringify(appPkg, null, 2));
+// /api/health 读 cwd 下的 RELEASE.json 报版本
+writeFileSync(join(STAGE, 'RELEASE.json'), JSON.stringify({ name: `MoraAnime ${VERSION}` }));
+
+// ── 3. 生产依赖 ───────────────────────────────────────────
+const depKey = JSON.stringify(appPkg.dependencies);
+const stampFile = join(STAGE, 'node_modules', '.mora-deps');
+if (!existsSync(stampFile) || readFileSync(stampFile, 'utf8') !== depKey) {
+  step('npm install --omit=dev（.stage/app）');
+  // 直接跑 npm-cli.js：Windows 上 npm 是 .cmd，不经 shell 起不来，经 shell 又有参数拼接的告警
+  const npmCli = process.env.npm_execpath?.endsWith('.js') ? process.env.npm_execpath
+    : join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  run(process.execPath, [npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], { cwd: STAGE });
+  writeFileSync(stampFile, depKey);
+}
+
+const sizeOf = (p) => { const s = statSync(p); return s.isDirectory() ? readdirSync(p).reduce((a, f) => a + sizeOf(join(p, f)), 0) : s.size; };
+console.log(`✔ 组装完成：${STAGE}（${(sizeOf(STAGE) / 1048576).toFixed(0)} MB）`);
+
+const ELECTRON = join(HERE, 'node_modules', 'electron', 'dist', 'electron.exe');
+if (has('--run')) {
+  step('启动 Electron');
+  run(ELECTRON, [STAGE], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
+}
+
+// ── 4. 打包 ───────────────────────────────────────────────
+if (has('--dist')) {
+  step('electron-builder：NSIS 安装包 + 便携版');
+  const { build, Platform, Arch } = await import('electron-builder');
+  const electronVersion = JSON.parse(readFileSync(join(HERE, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
+  await build({
+    projectDir: HERE,
+    targets: Platform.WINDOWS.createTarget(['nsis', 'portable'], Arch.x64),
+    publish: 'never',
+    config: {
+      appId: 'io.github.moraanime',
+      productName: 'MoraAnime',
+      copyright: 'MoraAnime contributors',
+      electronVersion,
+      directories: { app: STAGE, output: DIST, buildResources: join(HERE, 'assets') },
+      // 服务子进程要用普通文件系统读 build/、node_modules/（ELECTRON_RUN_AS_NODE 下的 asar 支持不完整，playwright 也要真实路径）
+      asar: false,
+      npmRebuild: false,
+      // 只要中文 / 英文语言包，其余 Chromium 语言包能省几十 MB
+      electronLanguages: ['zh-CN', 'zh-TW', 'en-US'],
+      files: ['**/*', '!**/*.map', '!**/{README,CHANGELOG,HISTORY}*.md', '!**/{test,tests,__tests__,docs,example,examples}/**'],
+      win: { icon: join(HERE, 'assets', 'icon.ico'), target: ['nsis', 'portable'], artifactName: '${productName}-${version}-${arch}.${ext}' },
+      nsis: {
+        oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true,
+        createDesktopShortcut: true, createStartMenuShortcut: true, shortcutName: 'MoraAnime',
+        artifactName: '${productName}-Setup-${version}.${ext}',
+        // 卸载时不删用户数据（番单在 %APPDATA%\MoraAnime\data 里）
+        deleteAppDataOnUninstall: false
+      },
+      portable: { artifactName: '${productName}-${version}-portable.${ext}' },
+      // 自动更新：electron-updater 读 GitHub Releases（还没发布时检查失败是静默的，见 main.js）
+      publish: [{ provider: 'github', owner: 'hiishousheng0925', repo: 'MoraAnime', releaseType: 'release' }]
+    }
+  });
+  for (const f of readdirSync(DIST).filter((x) => /\.(exe|yml|blockmap)$/.test(x)))
+    console.log(`  ${f}  ${(statSync(join(DIST, f)).size / 1048576).toFixed(1)} MB`);
+  console.log(`✔ 打包完成（${((Date.now() - t0) / 1000).toFixed(0)}s）→ ${DIST}`);
+}

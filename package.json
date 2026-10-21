@@ -1,0 +1,48 @@
+{
+  "name": "j-anime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:fresh": "node scripts/dev.js --fresh",
+    "dev:live": "node scripts/dev.js --live",
+    "staging": "node scripts/staging.js",
+    "staging:stop": "node scripts/staging.js --stop",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node scripts/test.js",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "lint": "node tests/lint-arch.js",
+    "test:stats": "node scripts/test.js stats-audit",
+    "test:ui": "node scripts/test.js watch-ui",
+    "test:build": "node scripts/test.js --build build.next",
+    "release": "node scripts/release.js",
+    "release:dry": "node scripts/release.js --dry-run",
+    "rollback": "node scripts/release.js --rollback",
+    "db:init": "node scripts/init-db.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:ingest": "node scripts/ingest-aod.js",
+    "db:bgm": "node scripts/enrich-bgm.js",
+    "db:backup": "node scripts/backup.js"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.2.12",
+    "@sveltejs/kit": "^2.20.0",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/vite": "^4.0.0",
+    "hls.js": "^1.7.3",
+    "svelte": "^5.20.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "dependencies": {
+    "anime4k-webgpu": "1.0.0",
+    "jsdom": "^29.1.1",
+    "phosphor-svelte": "3.1.0",
+    "playwright-core": "1.48.2"
+  }
+}
