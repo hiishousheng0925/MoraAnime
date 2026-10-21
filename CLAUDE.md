@@ -2,7 +2,7 @@
 
 Windows 桌面追番客户端（类似 Kazumi）。做法是**把上游网站原样搬到用户电脑上跑**：
 Electron 主进程用 `ELECTRON_RUN_AS_NODE=1` + 自己的 exe 当 Node，起一个子进程跑 SvelteKit（adapter-node）的产物，
-听 `127.0.0.1` 随机端口，窗口加载它。番剧库是本地 SQLite，片源解析、视频代理、播放全在本机。
+听 `127.0.0.1` 上的端口（记在 state.json，下次先用同一个，被占才换 —— 端口一变 origin 就变，localStorage 里的主题 / 倍速 / 音量全丢），窗口加载它。番剧库是本地 SQLite，片源解析、视频代理、播放全在本机。
 
 上游是一个私人追番网站项目（下文称「上游」，在 `UPSTREAM.json` 里叫 `j-anime`）。**开发以上游为主**：
 上游合了若干个 PR 之后，用 `tools/sync-upstream.js` 把差异打进来，再发客户端新版本。
@@ -96,7 +96,7 @@ node tools/export-catalog.js [--src <上游库>] [--out <目录>] [--publish] [-
   `user_entry_all triage_all watch_log_all saved_filter_all user_tag_all user_setting session signup_allow account setting watch_site`；
   另外 `sync_log.error` 置空、`anime.cover_local_path` 置空、`meta.test_copy` 删除。清完自检，有残留就失败
 - brotli q9 + 16MB 窗口（实测 214 MB → 51 MB，压缩约 28 秒，解压约 1 秒）
-- `catalog.json`：`{ format:1, version:日期, file, compression:'br', sha256, size, db:{sha256,size,anime}, syncedAt, exportedAt }`
+- `catalog.json`：`{ format:1, version:YYYY.MM.DD.HHmm（2026-10-22 起带时分，同一天重导也能下发；客户端只做相等比较）, file, compression:'br', sha256, size, db:{sha256,size,anime}, syncedAt, exportedAt }`
 - `--publish`：上传到 GitHub Releases 的**固定 tag `catalog`（预发布）**——应用自动更新读的是 latest release，
   番剧库每天发一次，不能占掉它。需要 `MORA_GITHUB_TOKEN`、`MORA_GITHUB_REPO`。先传数据包再传 manifest
 - 计划任务：`tools/install-export-task.ps1`（`-WhatIf` 先看，`-Publish` 带上传，`-Uninstall` 删除）

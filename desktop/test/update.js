@@ -7,7 +7,8 @@
  * 打印换库前后的个人数据（番单 / 快速标记 / 观看日志 / 账号）和日志里的结论，并核对：
  *   · 个人数据条数不减少（被折成 stub 的条目合并到 dup_of 那条，合并后条数可以变少，这里按「每条都有着落」核对）
  *   · 库没坏（quick_check）
- */
+ * 任何一条不满足 → 打印 ❌ 并 exit 1（2026-10-22 审查：原来只打印对比、没有断言，失败了退出码也是 0，
+ * 放进脚本 / CI 里等于没测）。
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,6 +23,17 @@ if (!/tmp|temp|work|test/i.test(HOME ?? '')) { console.error('--home 必须是�
 const DB = join(HOME, 'data', 'j-anime.db');
 const LOG = join(HOME, 'logs', 'main.log');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 换库后沿 dup_of 链找到条目最终挂在哪（和 db-tasks.js apply 的改挂规则一致） */
+function resolveIn(d, id) {
+  let cur = id;
+  for (let i = 0; i < 20; i++) {
+    const r = d.prepare('SELECT is_stub, dup_of FROM anime WHERE id = ?').get(cur);
+    if (!r || !r.is_stub || !r.dup_of) return cur;
+    cur = r.dup_of;
+  }
+  return cur;
+}
 
 function snapshot() {
   const d = new DatabaseSync(DB, { readOnly: true });
@@ -80,7 +92,38 @@ if (/已下载/.test(r1.hit ?? '')) {
 }
 const after = snapshot();
 console.log('换库后', JSON.stringify(after));
-console.log(JSON.stringify({ downloaded: /已下载/.test(r1.hit ?? ''), swapped: /换库完成/.test(r2?.tail ?? ''),
+const summary = { downloaded: /已下载/.test(r1.hit ?? ''), swapped: /换库完成/.test(r2?.tail ?? ''),
   versionBefore: before.version ?? before.testPack, versionAfter: after.version ?? after.testPack, quickCheck: after.check,
   entries: [before.entries.length, after.entries.length], triage: [before.triage.length, after.triage.length],
-  logs: [before.logs, after.logs], accounts: [before.accounts.length, after.accounts.length] }));
+  logs: [before.logs, after.logs], accounts: [before.accounts.length, after.accounts.length] };
+console.log(JSON.stringify(summary));
+
+// ── 断言 ──────────────────────────────────────────────────
+const fails = [];
+const expect = (ok, msg) => { if (!ok) fails.push(msg); };
+expect(summary.downloaded, `第 1 次启动没有下载新库：${r1.hit ?? '（日志里没等到结论）'}`);
+expect(summary.swapped, `第 2 次启动没有换库：${(r2?.tail.match(/换库失败[^\n]*/) ?? [r2?.hit ?? '（没跑第 2 次）'])[0]}`);
+expect(after.check === 'ok', `quick_check = ${after.check}`);
+expect(summary.versionAfter !== summary.versionBefore, `换库后版本没变：${summary.versionAfter}`);
+// --catalog 是本地 manifest 时核对换上的正是它那一版（make-pack 的测试包没有 mora_catalog_version，跳过）
+let wantVersion = null;
+try { if (CATALOG && !/^https?:/i.test(CATALOG)) wantVersion = JSON.parse(readFileSync(CATALOG.replace(/^file:\/\/\/?/i, ''), 'utf8')).version ?? null; } catch { /* 读不到就不核对 */ }
+if (wantVersion && after.version) expect(after.version === wantVersion, `换上的版本 ${after.version} ≠ manifest ${wantVersion}`);
+// 个人数据「每条都有着落」：换库前的每个 anime_id，沿新库的 dup_of 链走到底后必须还在
+{
+  const d = new DatabaseSync(DB, { readOnly: true });
+  try {
+    for (const [label, b, a] of [['番单', before.entries, after.entries], ['快速标记', before.triage, after.triage]]) {
+      const have = new Set(a.map((x) => x.anime_id));
+      const lost = b.map((x) => x.anime_id).filter((id) => !have.has(resolveIn(d, id)));
+      expect(!lost.length, `${label}丢了 ${lost.length} 条：${lost.slice(0, 10).join(', ')}`);
+    }
+  } finally { d.close(); }
+}
+expect(after.logs >= before.logs, `观看日志变少：${before.logs} → ${after.logs}`);
+const accIds = new Set(after.accounts.map((x) => x.id));
+expect(before.accounts.every((x) => accIds.has(x.id)), `账号丢了：${JSON.stringify(before.accounts)} → ${JSON.stringify(after.accounts)}`);
+
+if (fails.length) { for (const f of fails) console.error('❌', f); process.exit(1); }
+console.log('✅ 番剧库更新实测通过');
+process.exit(0);

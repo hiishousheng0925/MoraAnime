@@ -17,7 +17,8 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { CARRY_ON_SWAP, ANIME_REFS } from './catalog-tables.js';
+import { CARRY_ON_SWAP, ANIME_REFS, META_CARRY_PREFIXES } from './catalog-tables.js';
+import { SWAP_READY } from './catalog.js';
 
 const LIB = process.env.MORA_LIB;
 const DATA = process.env.J_ANIME_DATA;
@@ -72,13 +73,16 @@ async function bootstrap() {
  *   2. 旧库 checkpoint（WAL 合并进主文件，ATTACH 才能读到全部数据）
  *   3. swap ATTACH 旧库：个人表整表搬过去；指向 stub 的个人记录改挂 dup_of（沿用网站去重的合并写法）；
  *      手动关联取并集；封面本地缓存路径沿用
+ *      系列顺序（franchise_member.user_order）、本机片源统计（meta src_stat2:*）这两样藏在公共表里的个人数据单独搬
  *   4. integrity_check
- *   5. 旧库改名成 backups/j-anime.db.prev-<时间> → swap 改名成 j-anime.db；第二步失败就把旧库改回来
+ *   5. 写「swap 已就绪」标记 → 旧库改名成 backups/j-anime.db.prev-<时间> → swap 改名成 j-anime.db；第二步失败就把旧库改回来
+ *      两次改名之间断电：下次启动 catalog.js recoverInterruptedSwap 按标记把库接回来（不然会被当成首次启动）
  */
 async function apply(pending, version) {
   if (!pending || !existsSync(pending)) throw new Error(`新库不存在：${pending}`);
   if (!existsSync(DB)) throw new Error(`当前库不存在：${DB}`);
   const swap = DB + '.swap';
+  rmSync(DB + SWAP_READY, { force: true });
   rmSync(swap, { force: true }); rmSync(swap + '-wal', { force: true }); rmSync(swap + '-shm', { force: true });
   copyFileSync(pending, swap);
   const t0 = Date.now();
@@ -95,7 +99,7 @@ async function apply(pending, version) {
     db.exec(`ATTACH DATABASE '${DB.replace(/'/g, "''")}' AS o`);
     const has = (schema, t) => !!db.prepare(`SELECT 1 FROM ${schema}.sqlite_master WHERE type='table' AND name=?`).get(t);
     const cols = (schema, t) => db.prepare(`SELECT name FROM pragma_table_info(?, ?)`).all(t, schema).map((r) => r.name);
-    const report = { carried: {}, remapped: 0, orphans: 0 };
+    const report = { carried: {}, remapped: 0, orphans: 0, seriesOrder: 0, metaKept: 0 };
 
     db.exec('BEGIN');
     try {
@@ -110,6 +114,12 @@ async function apply(pending, version) {
       // 手动关联：上游的修正 + 本机用户自己加的（取并集）
       if (has('o', 'manual_relation'))
         db.exec('INSERT OR IGNORE INTO main.manual_relation (a_id, b_id, created_at) SELECT a_id, b_id, created_at FROM o.manual_relation');
+      // 本机积累的片源解析成败（2026-10-22 审查）：新库里带的是站主那台机器的统计，本机有的键以本机为准；
+      // 本机没记过的站沿用新库的（等于先借站主的经验，用着用着再变成本机的）
+      if (has('o', 'meta')) for (const p of META_CARRY_PREFIXES) {
+        report.metaKept += db.prepare(`INSERT INTO main.meta (key, value) SELECT key, value FROM o.meta WHERE substr(key, 1, length(?1)) = ?1
+                                       ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(p).changes;
+      }
       // 封面本地缓存：文件还在本机的封面目录里，路径沿用，免得每张都重新下载
       db.exec(`UPDATE main.anime SET cover_local_path = (SELECT oa.cover_local_path FROM o.anime oa WHERE oa.id = main.anime.id)
                WHERE cover_local_path IS NULL AND EXISTS (SELECT 1 FROM o.anime oa WHERE oa.id = main.anime.id AND oa.cover_local_path IS NOT NULL)`);
@@ -141,6 +151,34 @@ async function apply(pending, version) {
       db.exec('COMMIT');
       report.remapped = r.moved;
     }
+    // 系列顺序（2026-10-22 审查）：franchise_member 是公共表、新库整表换掉，但 user_order 是用户自己拖出来的。
+    // 按 anime_id 从旧库搬（折成 stub 的改挂到赢家，赢家自己的值优先）；系列成员可能变了（新番加入、重建），
+    // 所以不直接抄数字，而是和 build-franchise.js 一样用 mergeUserOrder：手排过的保持相对顺序，新成员按播出顺序插进去。
+    // 本机一部都没手排过的系列不动 —— 沿用新库里站主的顺序（全站修正）
+    if (has('o', 'franchise_member') && cols('o', 'franchise_member').includes('user_order') && cols('main', 'franchise_member').includes('user_order')) {
+      const saved = new Map();
+      for (const r of db.prepare('SELECT anime_id id, user_order o FROM o.franchise_member WHERE user_order IS NOT NULL').all()) {
+        const w = winnerOf(r.id);
+        if (w === r.id || !saved.has(w)) saved.set(w, r.o);
+      }
+      if (saved.size) {
+        const { mergeUserOrder } = await lib('seriesOrder.js');
+        const groups = new Map();
+        for (const r of db.prepare('SELECT franchise_id f, anime_id id FROM main.franchise_member ORDER BY franchise_id, release_order IS NULL, release_order, anime_id').all())
+          (groups.get(r.f) ?? groups.set(r.f, []).get(r.f)).push(r.id);
+        const upd = db.prepare('UPDATE main.franchise_member SET user_order = ? WHERE franchise_id = ? AND anime_id = ?');
+        db.exec('BEGIN');
+        try {
+          for (const [f, ids] of groups) {
+            const order = mergeUserOrder(ids, saved);
+            if (!order) continue;
+            for (const id of ids) upd.run(order.get(id), f, id);
+            report.seriesOrder++;
+          }
+          db.exec('COMMIT');
+        } catch (e) { db.exec('ROLLBACK'); throw e; }
+      }
+    }
     // 上游删掉了的条目（极少见）：个人记录留着不删，条目回来时自动接上；只记个数
     report.orphans = db.prepare('SELECT count(*) n FROM main.user_entry_all ue WHERE NOT EXISTS (SELECT 1 FROM main.anime a WHERE a.id = ue.anime_id)').get().n;
     if (version) db.prepare("INSERT INTO main.meta (key, value) VALUES ('mora_catalog_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(version);
@@ -155,16 +193,23 @@ async function apply(pending, version) {
     mkdirSync(backups, { recursive: true });
     const prev = join(backups, `j-anime.db.prev-${new Date().toISOString().replace(/[:.]/g, '-')}`);
     for (const ext of ['-wal', '-shm']) rmSync(DB + ext, { force: true });
+    // 标记写在两次改名之前（2026-10-22 审查）：swap 到这里已经完整（搬好个人数据、校验过、checkpoint 过），
+    // 中间断电时下次启动看到「没有库 + 有标记」就知道 swap 是好的新库，直接接上，而不是当成首次启动下载空库
+    writeFileSync(DB + SWAP_READY, JSON.stringify({ prev, version: version ?? null, at: new Date().toISOString() }));
     renameSync(DB, prev);
     try { renameSync(swap, DB); }
-    catch (e) { renameSync(prev, DB); throw e; }
+    catch (e) { renameSync(prev, DB); rmSync(DB + SWAP_READY, { force: true }); throw e; }
+    rmSync(DB + SWAP_READY, { force: true });
     for (const ext of ['-wal', '-shm']) rmSync(swap + ext, { force: true });
     // 换库前的旧库只留最近 2 份
     const olds = readdirSync(backups).filter((f) => f.startsWith('j-anime.db.prev-')).sort().reverse();
     for (const f of olds.slice(2)) rmSync(join(backups, f), { force: true });
     process.stdout.write(JSON.stringify({ ok: true, version, ms: Date.now() - t0, prev, ...report }) + '\n');
   } catch (e) {
+    // 旧库已经挪走、又没能挪回来（极少见）时 swap 是唯一的新库，留给下次启动恢复，不能删
+    if (!existsSync(DB)) throw e;
     for (const ext of ['', '-wal', '-shm', '-journal']) rmSync(swap + ext, { force: true });
+    rmSync(DB + SWAP_READY, { force: true });
     throw e;
   }
 }

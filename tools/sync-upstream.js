@@ -29,9 +29,10 @@ const UP = opt('--upstream', process.env.MORA_UPSTREAM);
 const TO = opt('--to', 'main');
 if (!UP) { console.error('用法：node tools/sync-upstream.js --upstream <上游仓库路径> [--to main] [--dry-run]'); process.exit(2); }
 
+// 失败时抛错而不是 process.exit（2026-10-22 审查）：exit 会跳过下面 try 的 finally，临时目录留在磁盘上
 function git(cwd, args, { allowFail = false, input } = {}) {
   const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', input, maxBuffer: 512 * 1024 * 1024 });
-  if (r.status !== 0 && !allowFail) { console.error(`❌ git ${args.join(' ')}\n${r.stderr}`); process.exit(1); }
+  if (r.status !== 0 && !allowFail) throw new Error(`git ${args.join(' ')} 失败\n${r.stderr}`);
   return r;
 }
 
@@ -69,22 +70,26 @@ console.log(`上游 ${short(from)}..${short(to)}：${files.length} 个文件（�
 for (const f of files) console.log(`  ${f}`);
 if (prs.length) { console.log('包含的 PR：'); for (const p of prs) console.log(`  ${p}`); }
 if (DRY) { console.log('（--dry-run：不改任何文件）'); process.exit(0); }
+
+// 本仓库工作区必须干净：冲突时要能分清哪些是同步带来的；也防止把用户已暂存的东西一起提交。
+// 2026-10-22 审查：原来这一步在「只有排除路径变动」分支之后，那条分支直接 commit，会把暂存区里别的改动一并带进去
+const dirty = git(ROOT, ['status', '--porcelain']).stdout.trim();
+if (dirty) { console.error(`❌ 工作区不干净，先提交或暂存：\n${dirty}`); process.exit(1); }
+
 if (!files.length) {
   // 只有被排除的路径变了：只挪 commit 指针
   meta.commit = to;
   writeFileSync(upFile, JSON.stringify(meta, null, 2) + '\n');
   git(ROOT, ['add', 'UPSTREAM.json']);
-  git(ROOT, ['commit', '-q', '-m', `同步 j-anime ${short(from)}..${short(to)}（只有排除路径有变动）`]);
+  // 再加一道 pathspec：即使上面的检查之后有人往暂存区塞了东西，这次提交也只含 UPSTREAM.json
+  git(ROOT, ['commit', '-q', '-m', `同步 j-anime ${short(from)}..${short(to)}（只有排除路径有变动）`, '--', 'UPSTREAM.json']);
   console.log('✔ 只有排除路径有变动，已更新 UPSTREAM.json');
   process.exit(0);
 }
 
-// 本仓库工作区必须干净：冲突时要能分清哪些是同步带来的
-const dirty = git(ROOT, ['status', '--porcelain']).stdout.trim();
-if (dirty) { console.error(`❌ 工作区不干净，先提交或暂存：\n${dirty}`); process.exit(1); }
-
 const tmp = mkdtempSync(join(tmpdir(), 'mora-sync-'));
 const patch = join(tmp, 'upstream.patch');
+let exitCode = 0;
 try {
   // --full-index：--3way 要靠完整的 blob id 找到原版本做三方合并
   writeFileSync(patch, git(UP, ['diff', '--binary', '--full-index', '--no-renames', `${from}..${to}`, ...pathspec]).stdout);
@@ -108,16 +113,19 @@ try {
     console.error(`\n⚠️ 有冲突，已停下（没有提交）。${ap.stderr.trim() ? '\n' + ap.stderr.trim() : ''}`);
     if (conflicts) { console.error('冲突文件：'); for (const f of conflicts.split('\n')) console.error(`  ${f}`); }
     console.error(`\n解决后：把 UPSTREAM.json 的 commit 改成 ${to}，git add 后自己提交。放弃：git reset --hard HEAD`);
-    process.exit(3);
+    // 不在 try 里 process.exit（2026-10-22 审查）：那样 finally 不执行，临时目录（含整份 patch）留在磁盘上
+    exitCode = 3;
+  } else {
+    meta.commit = to;
+    writeFileSync(upFile, JSON.stringify(meta, null, 2) + '\n');
+    git(ROOT, ['add', 'UPSTREAM.json']);
+    const msg = [`同步 j-anime ${short(from)}..${short(to)}`, '',
+      ...(prs.length ? ['包含的 PR：', ...prs.map((p) => `- ${p}`), ''] : []),
+      `改动 ${files.length} 个文件（排除 ${meta.excluded.join(' ')}）`].join('\n');
+    git(ROOT, ['commit', '-q', '-F', '-'], { input: msg });
+    console.log(`\n✔ 已提交：${git(ROOT, ['log', '-1', '--format=%h %s']).stdout.trim()}`);
   }
-  meta.commit = to;
-  writeFileSync(upFile, JSON.stringify(meta, null, 2) + '\n');
-  git(ROOT, ['add', 'UPSTREAM.json']);
-  const msg = [`同步 j-anime ${short(from)}..${short(to)}`, '',
-    ...(prs.length ? ['包含的 PR：', ...prs.map((p) => `- ${p}`), ''] : []),
-    `改动 ${files.length} 个文件（排除 ${meta.excluded.join(' ')}）`].join('\n');
-  git(ROOT, ['commit', '-q', '-F', '-'], { input: msg });
-  console.log(`\n✔ 已提交：${git(ROOT, ['log', '-1', '--format=%h %s']).stdout.trim()}`);
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
+if (exitCode) process.exit(exitCode);

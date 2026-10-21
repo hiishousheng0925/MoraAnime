@@ -5,7 +5,8 @@
  *   1. 番剧库：没有就下载（首次启动）；上次后台下好的新版本在这里换上（db-tasks apply）
  *   2. scripts/migrate.js（应用自己不跑 initSchema，缺列会 500 —— 和网站的启动脚本同一个道理）
  *   3. db-tasks bootstrap：确保本地账号、建会话令牌
- *   4. 子进程跑服务：ELECTRON_RUN_AS_NODE=1 + process.execPath = 同一个 exe 当 Node 用，听 127.0.0.1 随机端口
+ *   4. 子进程跑服务：ELECTRON_RUN_AS_NODE=1 + process.execPath = 同一个 exe 当 Node 用，听 127.0.0.1 固定端口
+ *      （首次随机取、记进 state.json，之后一直用它；被占了才换）
  *   5. 窗口塞会话 cookie、加载首页；之后后台检查番剧库更新（每天最多一次）和应用更新
  *
  * 环境变量（都可选，开发 / 测试用）：
@@ -16,10 +17,10 @@
 import { app, BrowserWindow, dialog, ipcMain, net, session, shell, Menu } from 'electron';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { fetchManifest, downloadCatalog } from './catalog.js';
+import { fetchManifest, downloadCatalog, recoverInterruptedSwap } from './catalog.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_DIR = join(HERE, '..');
@@ -43,15 +44,28 @@ const DAY = 24 * 3600_000;
 
 // ── 日志 / 状态 ─────────────────────────────────────────────
 const logFile = join(LOGS, 'main.log');
+const serverLog = join(LOGS, 'server.log');
+// 日志轮转（2026-10-22 审查）：原来只追加不清理，服务的 stderr（片源解析报错之类）常年累积会越长越大。
+// 启动时超过 5MB 就把旧的改名成 .1（只留一份，覆盖上一份 .1），再从空文件开始。
+// 拿到单实例锁之后才调：第二个实例不能去改名第一个实例正在写的日志
+function rotateLogs() {
+  for (const f of [logFile, serverLog]) {
+    try { if (statSync(f).size > 5 * 1048576) renameSync(f, f + '.1'); } catch { /* 没有文件 / 被占用：这次不轮转 */ }
+  }
+}
 function log(...a) {
   const line = `[${new Date().toISOString()}] ${a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')}\n`;
   try { appendFileSync(logFile, line); } catch { /* 日志写不进不影响运行 */ }
   if (!app.isPackaged) process.stdout.write(line);
 }
 const readState = () => { try { return JSON.parse(readFileSync(STATE, 'utf8')); } catch { return {}; } };
+// 写不进（磁盘满、杀毒软件锁着文件）只记日志：state.json 里都是「记住窗口位置」这类可有可无的东西，
+// 原来不包 try，在窗口 resize / move 回调里抛出来就是主进程的报错框（2026-10-22 审查）
 const writeState = (patch) => {
-  const s = { ...readState(), ...patch };
-  writeFileSync(STATE + '.part', JSON.stringify(s, null, 2)); renameSync(STATE + '.part', STATE);
+  try {
+    const s = { ...readState(), ...patch };
+    writeFileSync(STATE + '.part', JSON.stringify(s, null, 2)); renameSync(STATE + '.part', STATE);
+  } catch (e) { log('写 state.json 失败（不影响使用）', String(e?.message || e)); }
 };
 
 // ── 嗅探用的浏览器：本机 Chrome，没有就用系统自带的 Edge ───────────
@@ -76,6 +90,19 @@ function childEnv(extra = {}) {
 
 function runNode(script, args = [], extra = {}) {
   const r = spawnSync(process.execPath, [script, ...args], { cwd: APP_DIR, env: childEnv(extra), encoding: 'utf8', windowsHide: true });
+  return nodeResult(script, args, r);
+}
+/** 运行中（窗口已经开着）要跑 db-tasks 时用异步版：spawnSync 会把主进程卡住，窗口跟着没响应 */
+function runNodeAsync(script, args = [], extra = {}) {
+  return new Promise((resolve, reject) => {
+    const c = spawn(process.execPath, [script, ...args], { cwd: APP_DIR, env: childEnv(extra), windowsHide: true });
+    let stdout = '', stderr = '';
+    c.stdout.on('data', (b) => { stdout += b; }); c.stderr.on('data', (b) => { stderr += b; });
+    c.on('error', reject);
+    c.on('close', (status) => { try { resolve(nodeResult(script, args, { status, stdout, stderr })); } catch (e) { reject(e); } });
+  });
+}
+function nodeResult(script, args, r) {
   const out = (r.stdout || '') + (r.stderr || '');
   // bootstrap 的 stdout 是会话令牌，不进日志
   const shown = args[0] === 'bootstrap' ? (r.stderr || '') : out;
@@ -106,6 +133,11 @@ const mb = (n) => (n / 1048576).toFixed(1);
 
 // ── 番剧库 ─────────────────────────────────────────────────
 async function ensureCatalog() {
+  // 上次换库在两次改名之间断电：先把库接回来，否则下面会当成首次启动下载空库（2026-10-22 审查，见 catalog.js）
+  try {
+    const r = recoverInterruptedSwap(DATA);
+    if (r) log('检测到上次换库中断，已恢复', r);
+  } catch (e) { log('恢复中断的换库失败', String(e?.stack || e)); }
   if (existsSync(DB)) return applyPending();
   // 首次启动：下载
   for (;;) {
@@ -174,6 +206,9 @@ async function checkCatalogUpdate({ force = false } = {}) {
 }
 
 // ── 服务子进程 ─────────────────────────────────────────────
+// 端口固定（2026-10-22 审查）：原来每次启动随机取 → origin 每次不同 → 网站存在 localStorage 里的偏好
+// （主题、倍速、音量、超分档、画质）每次重启都丢，service worker / 缓存每个 origin 各装一份越积越多。
+// 现在首次随机取一个记进 state.json，之后先试这个；被别的程序占了才另取、记下新的
 function freePort() {
   return new Promise((resolve, reject) => {
     const s = createServer();
@@ -182,14 +217,38 @@ function freePort() {
     s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
   });
 }
+/** 只在 127.0.0.1 上试能不能 listen（服务也只听这个地址） */
+function canListen(p) {
+  return new Promise((resolve) => {
+    const s = createServer();
+    s.unref();
+    s.once('error', () => resolve(false));
+    s.listen(p, '127.0.0.1', () => s.close(() => resolve(true)));
+  });
+}
+async function pickPort() {
+  const saved = Number(readState().port);
+  if (Number.isInteger(saved) && saved > 1024 && saved < 65536 && await canListen(saved)) return saved;
+  const p = await freePort();
+  if (saved) log(`端口 ${saved} 被占用，改用 ${p}`);
+  writeState({ port: p });
+  return p;
+}
 
-let server = null, port = 0, quitting = false;
+let server = null, port = 0, origin = '', quitting = false;
+let sessionToken = null;
 const crashes = [];
 
+/** 把会话 cookie 塞给当前 origin（启动、换端口、重新登录都走这里） */
+function setSessionCookie() {
+  return session.defaultSession.cookies.set({ url: origin, name: COOKIE, value: sessionToken, httpOnly: true,
+    sameSite: 'lax', expirationDate: Math.floor(Date.now() / 1000) + 90 * 24 * 3600 });
+}
+
 function startServer() {
-  const origin = `http://127.0.0.1:${port}`;
+  origin = `http://127.0.0.1:${port}`;
   const env = childEnv({ HOST: '127.0.0.1', PORT: String(port), ORIGIN: origin, BODY_SIZE_LIMIT: '50M', J_ANIME_BRAND: 'MoraAnime', J_ANIME_DESKTOP: '1', J_ANIME_APP_VERSION: app.getVersion() });
-  const out = join(LOGS, 'server.log');
+  const out = serverLog;
   // --import 的绝对路径必须写成 file:// URL（Windows 上 C:\… 会被当成协议名）
   server = spawn(process.execPath, ['--import', pathToFileURL(join(HERE, 'guard.mjs')).href, join(BUILD, 'index.js')],
     { cwd: APP_DIR, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -211,8 +270,27 @@ function startServer() {
     }
     setTimeout(async () => {
       if (quitting) return;
+      // 端口被别的程序占了（服务退出的间隙被抢走，或者本来就是因为 EADDRINUSE 起不来）：原来原样重启会连崩 5 次
+      // 然后退出。重启前先试，被占就换端口 → 新 origin 要重新塞 cookie、主窗口跳到新地址（2026-10-22 审查）。
+      // 换了端口 = 换了 origin，这次运行里 localStorage 的偏好在新 origin 下看不到，下次启动起就固定在新端口上
+      let moved = false;
+      if (!(await canListen(port))) {
+        const old = port;
+        port = await freePort();
+        writeState({ port });
+        log(`重启服务：端口 ${old} 被占用，改用 ${port}`);
+        moved = true;
+      }
+      if (quitting) return;
       startServer();
-      if (await waitHealthy()) mainWin?.webContents.reload();
+      if (!(await waitHealthy())) return;
+      if (!mainWin || mainWin.isDestroyed()) return;
+      if (moved) {
+        await setSessionCookie().catch((e) => log('换端口后设置会话 cookie 失败', String(e?.message || e)));
+        let path = '/';
+        try { const u = new URL(mainWin.webContents.getURL()); path = u.pathname + u.search + u.hash; } catch { /* 用首页 */ }
+        mainWin.loadURL(origin + path).catch(() => {});
+      } else mainWin.webContents.reload();
     }, 1000);
   });
 }
@@ -250,7 +328,7 @@ function windowBounds() {
   return st?.bounds ? st : { bounds: { width: 1360, height: 860 }, maximized: false };
 }
 
-function createWindow(origin) {
+function createWindow() {
   const ws = windowBounds();
   mainWin = new BrowserWindow({
     ...ws.bounds, minWidth: 900, minHeight: 600, show: false, title: 'MoraAnime', backgroundColor: '#18181b',
@@ -258,6 +336,7 @@ function createWindow(origin) {
     webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false, preload: join(HERE, 'preload.cjs') }
   });
   if (ws.maximized) mainWin.maximize();
+  // 读全局 origin（不是建窗口时的快照）：服务崩溃重启可能换了端口
   const isLocal = (u) => { try { return new URL(u).origin === origin; } catch { return false; } };
   // 外链（target=_blank、原站链接）交给系统浏览器
   mainWin.webContents.setWindowOpenHandler(({ url }) => {
@@ -341,7 +420,8 @@ async function checkAppUpdate() {
 }
 
 // 检查到的新版本（右上角提示 + 重新打开弹窗用）；关掉弹窗后它还在，提示一直挂着直到更新
-let pendingUpdate = null, updDlg = null, updDownloading = false;
+// updPercent：下载进度，重新打开弹窗时直接显示；updListening：au 的进度 / 完成监听只挂一次
+let pendingUpdate = null, updDlg = null, updDownloading = false, updPercent = 0, updListening = false, updInstalling = false;
 ipcMain.handle('mora:update-state', () => pendingUpdate?.info.version ?? null);
 ipcMain.handle('mora:pick-folder', async (_e, defaultPath) => {
   const r = await dialog.showOpenDialog(mainWin, { title: '选择截图保存位置', defaultPath: defaultPath || undefined,
@@ -349,6 +429,28 @@ ipcMain.handle('mora:pick-folder', async (_e, defaultPath) => {
   return r.canceled ? null : r.filePaths[0] ?? null;
 });
 ipcMain.on('mora:open-update', () => { if (pendingUpdate) promptUpdate(pendingUpdate.au, pendingUpdate.info, pendingUpdate.portable); });
+
+// 会话失效后的出路（2026-10-22 审查）：内置账号 me 的密码是随机的，会话行被删 / cookie 被清之后页面弹登录框，
+// 用户却不知道密码。网站桌面模式的 requireLogin() 调 mora.relogin()：这里重跑一遍 bootstrap 建新会话、塞 cookie、
+// 刷新主窗口。只认本机页面发来的请求；并发的几次合成一次
+let relogging = null;
+ipcMain.handle('mora:relogin', async (e) => {
+  try { if (new URL(e.senderFrame?.url ?? '').origin !== origin) return false; } catch { return false; }
+  relogging ??= (async () => {
+    try {
+      sessionToken = JSON.parse((await runNodeAsync(join(HERE, 'db-tasks.js'), ['bootstrap'])).trim().split('\n').pop()).token;
+      await setSessionCookie();
+      log('会话失效，已重新建会话');
+      // 先把 true 回给页面再刷新（同步 reload 会让这次 invoke 的回复落空）
+      setTimeout(() => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.reload(); }, 100);
+      return true;
+    } catch (err) {
+      log('重新建会话失败', String(err?.message || err));
+      return false;
+    } finally { relogging = null; }
+  })();
+  return relogging;
+});
 
 // 弹窗跟着客户端当前主题走：从主窗口读 --c-* 变量传给 update.html
 const THEME_VARS = ['--c-bg', '--c-surface', '--c-surface-2', '--c-border', '--c-text', '--c-text-soft',
@@ -374,33 +476,48 @@ async function promptUpdate(au, info, portable) {
     x: b.x, y: b.y, width: b.width, height: b.height, title: 'MoraAnime 更新',
     webPreferences: { sandbox: true, contextIsolation: true, spellcheck: false } });
   updDlg = dlg;
-  dlg.on('closed', () => { updDlg = null; });
+  // 下载中不让关（Alt+F4 也算）：原来关掉弹窗下载照样继续、下完自动装，违背「关闭 = 这次不更新」（2026-10-22 审查）。
+  // electron-updater 的下载取消不了，只能下完再说；退出客户端（quitting）时放行
+  dlg.on('close', (e) => { if (updDownloading && !quitting) e.preventDefault(); });
+  dlg.on('closed', () => { if (updDlg === dlg) updDlg = null; });
   dlg.setMenu(null);
   dlg.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   dlg.webContents.on('will-navigate', (e) => e.preventDefault());
   const run = (js) => { if (!dlg.isDestroyed()) dlg.webContents.executeJavaScript(js).catch(() => {}); };
+  // 进度 / 结果推给「当前」的弹窗：关掉再打开后是另一个窗口，推给闭包里的旧 dlg 新弹窗就不动了（2026-10-22 审查）
+  const runCur = (js) => { if (updDlg && !updDlg.isDestroyed()) updDlg.webContents.executeJavaScript(js).catch(() => {}); };
+  const progressBar = (v) => { if (mainWin && !mainWin.isDestroyed()) mainWin.setProgressBar(v); };
   const link = DOWNLOAD + (portable ? 'MoraAnime-portable.exe' : 'MoraAnime-Setup.exe');
 
   const download = () => {
-    if (updDownloading) return;
+    if (updDownloading || updInstalling) return;
     updDownloading = true;
+    updPercent = 0;
     log('[updater] 用户选择立即更新，开始下载');
-    run('progress(0)');
-    au.on('download-progress', (p) => {
-      run(`progress(${p.percent})`);
-      if (!win.isDestroyed()) win.setProgressBar(p.percent / 100);
-    });
-    au.once('update-downloaded', () => {
-      log('[updater] 下载完成，安装并重启');
-      run('progress(100)');
-      setTimeout(() => au.quitAndInstall(true, true), 800);
-    });
+    runCur('progress(0)');
+    // 监听只挂一次：原来每调一次 download() 多挂一组，下载失败后重试会 quitAndInstall 两次
+    if (!updListening) {
+      updListening = true;
+      au.on('download-progress', (p) => {
+        updPercent = p.percent;
+        runCur(`progress(${p.percent})`);
+        progressBar(p.percent / 100);
+      });
+      au.on('update-downloaded', () => {
+        if (updInstalling || quitting) return;
+        updInstalling = true;
+        updDownloading = false;
+        log('[updater] 下载完成，安装并重启');
+        runCur('progress(100)');
+        setTimeout(() => au.quitAndInstall(true, true), 800);
+      });
+    }
     au.downloadUpdate().catch((e) => {
       const msg = String(e?.message || e).slice(0, 200);
       log('[updater] 下载失败', msg);
       updDownloading = false;
-      if (!win.isDestroyed()) win.setProgressBar(-1);
-      run(`failed(${JSON.stringify(msg)})`);
+      progressBar(-1);
+      runCur(`failed(${JSON.stringify(msg)})`);
     });
   };
   dlg.webContents.on('did-navigate-in-page', (_e, url) => {
@@ -414,6 +531,8 @@ async function promptUpdate(au, info, portable) {
   });
   await dlg.loadFile(join(HERE, 'update.html'));
   run(`init(${JSON.stringify({ version: info.version, current: app.getVersion(), notes: notesList(info.releaseNotes), theme })})`);
+  // 正在下载 / 已下完待安装时重新打开（下载中关不掉，保险起见）：直接显示进度
+  if (updDownloading || updInstalling) run(`progress(${updInstalling ? 100 : updPercent})`);
   dlg.show();
   dlg.focus();
 }
@@ -422,7 +541,15 @@ async function promptUpdate(au, info, portable) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => { if (mainWin) { if (mainWin.isMinimized()) mainWin.restore(); mainWin.focus(); } });
+  rotateLogs();
+  // 启动画面期间（mainWin 还没建）双击图标原来没反应：聚焦启动画面（2026-10-22 审查）
+  app.on('second-instance', () => {
+    const w = mainWin && !mainWin.isDestroyed() ? mainWin : splash && !splash.isDestroyed() ? splash : null;
+    if (!w) return;
+    if (w.isMinimized()) w.restore();
+    if (w !== splash || splashReady) w.show();
+    w.focus();
+  });
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', () => { quitting = true; stopServer(); });
   process.on('exit', stopServer);
@@ -435,15 +562,18 @@ if (!app.requestSingleInstanceLock()) {
       await ensureCatalog();
       splashMsg('正在准备数据库');
       runNode(MIGRATE);
-      const { token } = JSON.parse(runNode(join(HERE, 'db-tasks.js'), ['bootstrap']).trim().split('\n').pop());
-      port = await freePort();
-      const origin = `http://127.0.0.1:${port}`;
+      sessionToken = JSON.parse(runNode(join(HERE, 'db-tasks.js'), ['bootstrap']).trim().split('\n').pop()).token;
+      port = await pickPort();
       splashMsg('正在启动');
       startServer();
-      if (!(await waitHealthy())) throw new Error(`本地服务没有起来，日志：${join(LOGS, 'server.log')}`);
-      await session.defaultSession.cookies.set({ url: origin, name: COOKIE, value: token, httpOnly: true,
-        sameSite: 'lax', expirationDate: Math.floor(Date.now() / 1000) + 90 * 24 * 3600 });
-      const win = createWindow(origin);
+      if (!(await waitHealthy())) throw new Error(`本地服务没有起来，日志：${serverLog}`);
+      await setSessionCookie();
+      // 以前每个随机端口（= 每个 origin）各装一份 service worker + Cache Storage（用户真机 90MB / 10 份）；
+      // 桌面模式已不注册 service worker，每次启动都把这两类清掉（清了无害，旧 origin 的残留也一并清走，不用记标记）。
+      // 只清这两类：localStorage（主题等偏好，固定端口后就靠它）和 cookie（会话）不动（2026-10-22 审查）
+      await session.defaultSession.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] })
+        .catch((e) => log('清理 service worker 缓存失败（不影响使用）', String(e?.message || e)));
+      const win = createWindow();
       await win.loadURL(origin + '/');
       log(`启动完成 ${Date.now() - t0}ms`);
       writeState({ lastStartupMs: Date.now() - t0 });

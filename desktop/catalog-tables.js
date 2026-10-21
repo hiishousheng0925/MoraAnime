@@ -31,3 +31,12 @@ export const CARRY_ON_SWAP = ['account', 'session', 'signup_allow', 'user_settin
 export const ANIME_REFS = {
   user_entry_all: 'anime_id', triage_all: 'anime_id', watch_log_all: 'anime_id', user_tag_all: 'anime_id'
 };
+
+/**
+ * 不是整张表、而是「公共表里的个人数据」—— CARRY_ON_SWAP 整表搬管不到，db-tasks.js apply 单独处理（2026-10-22 审查）：
+ *   franchise_member.user_order  系列顺序（网站 queries/user.js moveInSeries / resetSeriesOrder 写，backup.js 当用户数据备份）。
+ *                                新库里是站主排的，不搬的话用户自己拖好的顺序每次换库都被冲掉
+ *   meta 里 src_stat2:*           本机积累的片源解析成败（watchSite.js recordResolve）。观看页按它给片源排序，
+ *                                换库被站主那份覆盖 = 本机用出来的「哪个站能播」作废
+ */
+export const META_CARRY_PREFIXES = ['src_stat2:'];
