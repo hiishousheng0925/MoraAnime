@@ -24,7 +24,7 @@ desktop/                          ← 客户端独有
   catalog-tables.js 「公共数据 vs 个人数据」的表清单（导出清空 / 换库搬运共用这一份）
   guard.mjs         服务子进程的进程级兜底（播放器中途断开的 EPIPE 之类不让进程退出）
   build.js          组装 .stage/app + electron-builder 打包
-  assets/           图标（tools/make-icon.js 从 static/icon.svg 生成）
+  assets/           图标（tools/make-icon.js 从 desktop/icon.svg 生成：客户端配色的追番猫）
   test/             客户端实测脚本（e2e.js / update.js / make-pack.js）
   package.json      Electron / electron-builder（devDependencies）；appDependencies = 只给客户端装的运行时依赖
 tools/                            ← 客户端独有

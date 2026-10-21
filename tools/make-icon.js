@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把 static/icon.svg 渲染成客户端图标：desktop/assets/icon.ico（16–256 多尺寸）+ icon.png（256，给安装包 / 窗口用）。
+ * 把 desktop/icon.svg（客户端配色的追番猫：紫→樱粉；网站的 static/icon.svg 是蓝紫）渲染成客户端图标：desktop/assets/icon.ico（16–256 多尺寸）+ icon.png（256，给安装包 / 窗口用）。
  * 用本机 Chrome / Edge（playwright-core，网站本来就依赖它）。图标改了才需要重跑，产物进仓库。
  *
  *   node tools/make-icon.js
@@ -20,7 +20,7 @@ const exe = [process.env.J_ANIME_CHROME,
   ...pf.map((p) => join(p, 'Microsoft', 'Edge', 'Application', 'msedge.exe'))].find((p) => p && existsSync(p));
 if (!exe) { console.error('找不到 Chrome / Edge'); process.exit(1); }
 
-const svg = readFileSync(join(ROOT, 'static', 'icon.svg'), 'utf8');
+const svg = readFileSync(join(ROOT, 'desktop', 'icon.svg'), 'utf8');
 const browser = await chromium.launch({ executablePath: exe, headless: true });
 const pngs = [];
 try {
