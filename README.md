@@ -7,7 +7,9 @@ Windows 上的本地追番客户端：番剧目录、搜索、详情、放送表
 
 ## 下载安装
 
-在 [Releases](https://github.com/hiishousheng0925/MoraAnime/releases) 页面下载：
+**直接下载最新版**：[MoraAnime-Setup.exe](https://github.com/hiishousheng0925/MoraAnime/releases/latest/download/MoraAnime-Setup.exe)（这个链接永远指向最新版本）
+
+或在 [Releases](https://github.com/hiishousheng0925/MoraAnime/releases/latest) 页面下载：
 
 | 文件 | 说明 |
 |---|---|
