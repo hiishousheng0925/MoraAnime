@@ -271,18 +271,21 @@
       {/if}
       <div class="row flex items-center gap-2">
         {#if user}
-          <a href="/settings#account" data-sveltekit-reload title="账号设置"
+          <a href={data.desktop ? '/settings' : '/settings#account'} data-sveltekit-reload title={data.desktop ? '设置' : '账号设置'}
              class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 hover:bg-ink-800">
             <span class="ava grid h-8 w-8 shrink-0 place-items-center rounded-full text-[12.5px] font-bold uppercase text-white">
               {user.username.slice(0, 1)}
             </span>
             <span class="lbl truncate text-[13px] text-ink-200">{user.username}</span>
           </a>
+          <!-- 桌面客户端单机免登录：不给登出（登出后只会弹登录框） -->
+          {#if !data.desktop}
           <button type="button" onclick={signOut} title="登出" aria-label="登出"
                   class="lbl grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-900 text-ink-200
                          transition hover:border-ink-400 active:scale-95">
             <SignOut size={16} />
           </button>
+          {/if}
         {:else}
           <button type="button" onclick={() => requireLogin()} title="登录"
                   class="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent text-[13px] font-medium

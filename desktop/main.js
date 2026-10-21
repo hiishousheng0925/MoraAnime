@@ -188,7 +188,7 @@ const crashes = [];
 
 function startServer() {
   const origin = `http://127.0.0.1:${port}`;
-  const env = childEnv({ HOST: '127.0.0.1', PORT: String(port), ORIGIN: origin, BODY_SIZE_LIMIT: '50M', J_ANIME_BRAND: 'MoraAnime' });
+  const env = childEnv({ HOST: '127.0.0.1', PORT: String(port), ORIGIN: origin, BODY_SIZE_LIMIT: '50M', J_ANIME_BRAND: 'MoraAnime', J_ANIME_DESKTOP: '1' });
   const out = join(LOGS, 'server.log');
   // --import 的绝对路径必须写成 file:// URL（Windows 上 C:\… 会被当成协议名）
   server = spawn(process.execPath, ['--import', pathToFileURL(join(HERE, 'guard.mjs')).href, join(BUILD, 'index.js')],

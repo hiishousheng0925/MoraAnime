@@ -60,12 +60,14 @@
   /**
    * 左侧目录（桌面）：设置项一多，滚来滚去找不到。分「个人」「站点管理」两组（组标题是结构不是说明）。
    * 多账号后按身份显示：个人的（账号 / 备份 / 分享 / 筛选）要登录；
-   * 动的是服务器或全站的（截图位置 / 观看站 / 注册白名单）只有管理员看得到
+   * 动的是服务器或全站的（截图位置 / 观看站 / 注册白名单）只有管理员看得到。
+   * 桌面客户端（data.desktop，单机单用户）：没有账号 / 注册 / 分享（链接指向本机 127.0.0.1，发给别人打不开）
    */
+  const desk = $derived(!!data.desktop);
   const TOC = $derived([
-    ['个人', [['account', '账号', true], ['backup', '备份与恢复', !!user], ['look', '外观', true], ['years', '显示年份', true],
-              ['filter', '内容过滤', true], ['share', '分享番单', !!user], ['saved', '保存的筛选', !!user && data.filters.length > 0]]],
-    [admin ? '站点管理' : '站点', [['members', '注册白名单', admin], ['shots', '截图', admin], ['sites', '观看站', admin],
+    ['个人', [['account', '账号', !desk], ['backup', '备份与恢复', !!user], ['look', '外观', true], ['years', '显示年份', true],
+              ['filter', '内容过滤', true], ['share', '分享番单', !!user && !desk], ['saved', '保存的筛选', !!user && data.filters.length > 0]]],
+    [desk ? '其他' : admin ? '站点管理' : '站点', [['members', '注册白名单', admin && !desk], ['shots', '截图', admin], ['sites', '观看站', admin],
               ['stats', '数据', true], ['sources', '数据来源', true]]]
   ].map(([g, xs]) => [g, xs.filter((x) => x[2])]));
 
@@ -126,7 +128,8 @@
 
   <div class="mt-5 space-y-7 lg:mt-0">
     <!-- ── 个人 ── -->
-    <!-- 账号（多账号，2026-10-19） -->
+    <!-- 账号（多账号，2026-10-19）；桌面客户端没有 -->
+    {#if !desk}
     <Group id="account" title="账号">
       {#if user}
         <AccountCard {user} sessions={data.sessions} />
@@ -137,6 +140,7 @@
         </div>
       {/if}
     </Group>
+    {/if}
 
     {#if user}
       <Group id="backup" title="备份与恢复"><BackupCard total={data.stats?.total ?? 0} /></Group>
@@ -199,7 +203,7 @@
     </Group>
 
     <!-- 分享 -->
-    {#if user}
+    {#if user && !desk}
     <Group id="share" title="分享番单">
       {#if data.shareToken}
         <div class="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -235,7 +239,7 @@
     {/if}
 
     <!-- ── 站点管理 ── -->
-    {#if admin}
+    {#if admin && !desk}
       <Group id="members" title="注册白名单"><SignupAllow list={data.allow} /></Group>
     {/if}
 
