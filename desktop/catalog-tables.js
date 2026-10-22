@@ -17,12 +17,19 @@ export const ACCOUNT_TABLES = ['account', 'session', 'signup_allow', 'user_setti
 /**
  * 站点 / 本机配置：
  *   setting     站点设置（截图目录等）
- *   watch_site  观看站 URL 模板（站主自己配的，客户端由用户自己配）
+ *   watch_site  观看站 URL 模板（观看页上方「去原站搜」那一行）
+ *
+ * watch_site 不清空、随番剧库一起发（2026-10-23 主人对比网站发现客户端少了「去原站搜」）：
+ * 里面只有站名和搜索地址模板，不是个人数据，当作默认值下发。换库时本机有自己的就保留本机的，
+ * 本机一条都没有才用新库带的（见 KEEP_IF_EMPTY）
  */
 export const LOCAL_CONFIG = ['setting', 'watch_site'];
 
+/** 换库时：本机这张表是空的就不搬（保留新库带来的默认值），有内容才用本机的 */
+export const KEEP_IF_EMPTY = ['watch_site'];
+
 /** 发布前必须清空的表（顺序 = 外键依赖从子到父） */
-export const CLEAR_ON_EXPORT = [...PERSONAL_ALL, 'user_setting', 'session', 'signup_allow', 'account', ...LOCAL_CONFIG];
+export const CLEAR_ON_EXPORT = [...PERSONAL_ALL, 'user_setting', 'session', 'signup_allow', 'account', 'setting'];
 
 /** 换库时从旧库整表搬到新库的（顺序 = 外键依赖从父到子） */
 export const CARRY_ON_SWAP = ['account', 'session', 'signup_allow', 'user_setting', ...LOCAL_CONFIG, ...PERSONAL_ALL];

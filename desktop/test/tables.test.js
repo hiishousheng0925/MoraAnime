@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { PERSONAL_TABLES, migrateBefore, migrateAfter } from '../../src/lib/server/multiUser.js';
-import { PERSONAL_ALL, ACCOUNT_TABLES, LOCAL_CONFIG, CLEAR_ON_EXPORT, CARRY_ON_SWAP, ANIME_REFS } from '../catalog-tables.js';
+import { PERSONAL_ALL, ACCOUNT_TABLES, LOCAL_CONFIG, CLEAR_ON_EXPORT, CARRY_ON_SWAP, ANIME_REFS, KEEP_IF_EMPTY } from '../catalog-tables.js';
 
 test('multiUser.js 的每张个人表都在清单里', () => {
   for (const t of PERSONAL_TABLES) assert.ok(PERSONAL_ALL.includes(`${t}_all`), `${t}_all 不在 PERSONAL_ALL`);
@@ -32,7 +32,8 @@ test('建出来的库里：带 user_id 的表都被导出清空、换库搬运',
   for (const t of [...ACCOUNT_TABLES, ...LOCAL_CONFIG]) assert.ok(tables.includes(t), `清单里的 ${t} 在库里不存在`);
 });
 
-test('导出清空和换库搬运是同一批表', () => {
-  assert.deepEqual([...CLEAR_ON_EXPORT].sort(), [...CARRY_ON_SWAP].sort());
+test('导出清空和换库搬运是同一批表（观看站例外：随番剧库下发当默认值，换库仍搬本机的）', () => {
+  assert.deepEqual([...CLEAR_ON_EXPORT, ...KEEP_IF_EMPTY].sort(), [...CARRY_ON_SWAP].sort());
+  for (const t of KEEP_IF_EMPTY) assert.ok(!CLEAR_ON_EXPORT.includes(t) && CARRY_ON_SWAP.includes(t));
   for (const t of Object.keys(ANIME_REFS)) assert.ok(PERSONAL_ALL.includes(t));
 });

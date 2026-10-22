@@ -17,7 +17,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { CARRY_ON_SWAP, ANIME_REFS, META_CARRY_PREFIXES } from './catalog-tables.js';
+import { CARRY_ON_SWAP, ANIME_REFS, META_CARRY_PREFIXES, KEEP_IF_EMPTY } from './catalog-tables.js';
 import { SWAP_READY } from './catalog.js';
 
 const LIB = process.env.MORA_LIB;
@@ -105,6 +105,11 @@ async function apply(pending, version) {
     try {
       for (const t of CARRY_ON_SWAP) {
         if (!has('main', t) || !has('o', t)) continue;
+        // 本机还没配过（空表）：保留新库带来的默认值，不用空表把它冲掉
+        if (KEEP_IF_EMPTY.includes(t) && !db.prepare(`SELECT 1 FROM o."${t}" LIMIT 1`).get()) {
+          report.carried[t] = db.prepare(`SELECT count(*) n FROM main."${t}"`).get().n;
+          continue;
+        }
         const oc = new Set(cols('o', t));
         const c = cols('main', t).filter((x) => oc.has(x)).map((x) => `"${x}"`).join(', ');
         db.exec(`DELETE FROM main."${t}"`);

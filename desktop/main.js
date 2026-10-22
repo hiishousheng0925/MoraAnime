@@ -40,7 +40,12 @@ for (const d of [HOME, DATA, LOGS]) mkdirSync(d, { recursive: true });
 app.setPath('userData', HOME);
 
 const COOKIE = 'j_anime_sid';
-const DAY = 24 * 3600_000;
+/**
+ * 番剧库多久查一次：每天 06:00 导出新库。原来只在启动时查、距上次不到 24 小时就跳过 ——
+ * 客户端一直开着就永远不查，启动时间不巧还会整天跳过（主人实测 10/22 的库到 10/23 还没拿到）。
+ * 现在运行中每 3 小时查一次，启动时也按 3 小时节流
+ */
+const CATALOG_EVERY = 3 * 3600_000;
 
 // ── 日志 / 状态 ─────────────────────────────────────────────
 const logFile = join(LOGS, 'main.log');
@@ -185,7 +190,7 @@ function applyPending() {
 /** 后台：每天最多一次查 manifest，有新版就下到 catalog-pending/，下次启动换上 */
 async function checkCatalogUpdate({ force = false } = {}) {
   const st = readState();
-  if (!force && st.catalogCheckedAt && Date.now() - st.catalogCheckedAt < DAY) return { skipped: true };
+  if (!force && st.catalogCheckedAt && Date.now() - st.catalogCheckedAt < CATALOG_EVERY) return { skipped: true };
   try {
     const m = await fetchManifest(fetchFn);
     writeState({ catalogCheckedAt: Date.now() });
@@ -580,6 +585,7 @@ if (!app.requestSingleInstanceLock()) {
       // 应用更新只读一个 latest.yml，开窗口后很快就能弹（原来 5 秒后才查、旧版还要先下完安装包，主人实测约 20 秒）
       setTimeout(checkAppUpdate, 1500);
       setTimeout(checkCatalogUpdate, 5000);
+      setInterval(checkCatalogUpdate, CATALOG_EVERY).unref?.();
     } catch (e) {
       log('启动失败', String(e?.stack || e));
       dialog.showErrorBox('MoraAnime 启动失败', String(e?.message || e));

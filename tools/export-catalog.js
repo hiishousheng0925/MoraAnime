@@ -31,7 +31,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createBrotliCompress, constants as Z } from 'node:zlib';
-import { CLEAR_ON_EXPORT, PERSONAL_ALL, ACCOUNT_TABLES, LOCAL_CONFIG } from '../desktop/catalog-tables.js';
+import { CLEAR_ON_EXPORT } from '../desktop/catalog-tables.js';
 import { envValue } from '../src/lib/server/envFile.js';
 import { resolveRepo, resolveToken, createClient, uploadReplacing, replaceAssetAtomic } from './github.js';
 
@@ -135,7 +135,7 @@ try {
   for (const f of packs.slice(KEEP)) rmSync(join(OUT, f), { force: true });
   console.log(`📦 ${join(OUT, file)}\n   ${join(OUT, 'catalog.json')}`);
   console.log(`✔ 导出完成，总耗时 ${ms()}`);
-  console.log(JSON.stringify({ ...manifest, personalTablesChecked: [...PERSONAL_ALL, ...ACCOUNT_TABLES, ...LOCAL_CONFIG] }));
+  console.log(JSON.stringify({ ...manifest, personalTablesChecked: CLEAR_ON_EXPORT }));
 
   // ── 5. 发布（缺省不跑）────────────────────────────────────
   if (PUBLISH) await publish(OUT, file, manifest);

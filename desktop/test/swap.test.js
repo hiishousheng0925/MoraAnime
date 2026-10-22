@@ -133,3 +133,31 @@ test('换库两次改名之间断电：按标记 / 备份把库接回来，不�
     assert.equal(s.cur(), null);
   });
 });
+
+test('换库：观看站随番剧库下发当默认值；本机配过的保留本机的（2026-10-23）', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'mora-swap-test-'));
+  const site = (db, rows) => { for (const [n, u] of rows) db.prepare('INSERT INTO watch_site (name, url, ord, enabled) VALUES (?, ?, 0, 1)').run(n, u); };
+  const apply = (data, newDb) => {
+    const r = spawnSync(process.execPath, [join(ROOT, 'desktop', 'db-tasks.js'), 'apply', newDb, 'v-ws'], {
+      env: { ...process.env, J_ANIME_DATA: data, MORA_HOME: tmp, MORA_LIB: join(ROOT, 'src', 'lib', 'server'), MORA_MIGRATE: MIGRATE },
+      encoding: 'utf8'
+    });
+    assert.equal(r.status, 0, r.stderr || r.stdout);
+  };
+  const names = (path) => { const d = new DatabaseSync(path, { readOnly: true }); const v = d.prepare('SELECT name FROM watch_site ORDER BY name').all().map((x) => x.name); d.close(); return v; };
+  try {
+    const data = join(tmp, 'data');
+    mkdirSync(data);
+    // ① 本机一个观看站都没有 → 用新库带来的
+    freshDb(join(data, 'j-anime.db')).close();
+    let n = freshDb(join(tmp, 'new1.db')); site(n, [['AGE', 'https://a/{q}'], ['樱花', 'https://b/{q}']]); n.close();
+    apply(data, join(tmp, 'new1.db'));
+    assert.deepEqual(names(join(data, 'j-anime.db')), ['AGE', '樱花']);
+    // ② 本机改过（只留自己加的一个）→ 下次换库不被新库覆盖
+    const db = new DatabaseSync(join(data, 'j-anime.db'));
+    db.exec('DELETE FROM watch_site'); site(db, [['自建', 'https://c/{q}']]); db.close();
+    n = freshDb(join(tmp, 'new2.db')); site(n, [['AGE', 'https://a/{q}'], ['Otage', 'https://d/{q}']]); n.close();
+    apply(data, join(tmp, 'new2.db'));
+    assert.deepEqual(names(join(data, 'j-anime.db')), ['自建']);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});

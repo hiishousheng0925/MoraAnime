@@ -162,9 +162,10 @@ await shot(page, '03-watch-playing.png');
 // 拖到 95%：触发「播到 90% 记进度」
 if (played?.d > 0) {
   await page.evaluate(() => { const v = document.querySelector('video'); v.currentTime = v.duration * 0.95; v.play().catch(() => {}); });
-  await sleep(6000);
 }
-const e1 = entryOf(WATCH_ID);
+// 轮询最多 30 秒：拖到 95% 后片源要重新缓冲，国内 CDN 慢的时候 6 秒还没播到（2026-10-23 实测：功能正常、固定等 6 秒误报）
+let e1 = null;
+for (let i = 0; i < 60 && !(e1?.current_episode >= 1); i++) { await sleep(500); e1 = entryOf(WATCH_ID); }
 ok(e1 && (e1.current_episode ?? 0) >= 1, '播放进度记下来了', e1 ? `status=${e1.status} 第 ${e1.current_episode} 集` : '没有记录');
 await shot(page, '04-watch-marked.png');
 await closeApp(browser);
