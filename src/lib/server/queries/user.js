@@ -4,6 +4,7 @@
  */
 import { getDb, tx } from '../db.js';
 import { WATCHED, WATCHED_EPS } from './stats.js';
+import { airedCount } from '../episodes.js';
 
 export function myStats() {
   const db = getDb();
@@ -72,12 +73,15 @@ export function setEntry(animeId, patch) {
   // 而我的统计那边 completed 一律按 coalesce(current_episode, a.episodes) 算，两处对不上。
   // 快速标记来的记录（is_vague=1）同样要补：is_vague 只决定撤销时能不能删，
   // 不该影响进度怎么显示。
-  if (next.status === 'completed' && total && !next.current_episode) {
-    next.current_episode = total;
+  // 补到「已播」而不是总集数（2026-10-23 主人报：恶女不才 Bangumi 只播了 11 集、另一个数据源写 12 集，
+  // 点「看完」被补成第 12 集）。连载中 / 已播少于总集数才有 airedCount，否则照旧补总集数
+  const fill = total ? (airedCount(animeId)?.aired || total) : null;
+  if (next.status === 'completed' && fill && !next.current_episode) {
+    next.current_episode = fill;
   }
   // 从「看完」改成别的状态时，若集数正好等于总集数，说明是上面自动补的，退回未填
   if (cur?.status === 'completed' && next.status !== 'completed'
-      && total && next.current_episode === total && patch.current_episode === undefined) {
+      && fill && next.current_episode === fill && patch.current_episode === undefined) {
     next.current_episode = null;
   }
   // upsert 只能写真表（视图不支持 ON CONFLICT，见 multiUser.js）

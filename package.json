@@ -24,7 +24,8 @@
     "db:migrate": "node scripts/migrate.js",
     "db:ingest": "node scripts/ingest-aod.js",
     "db:bgm": "node scripts/enrich-bgm.js",
-    "db:backup": "node scripts/backup.js"
+    "db:backup": "node scripts/backup.js",
+    "sync:client": "node scripts/sync-to-client.js"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.12",

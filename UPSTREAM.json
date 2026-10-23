@@ -1,6 +1,6 @@
 {
   "upstream": "j-anime",
-  "commit": "213060d2f82cca38c4bc98369c4d025e3c5386b0",
+  "commit": "676b94371c50cf8b92479dcea77cd9c280b1c683",
   "excluded": [
     "deploy/",
     ".claude/",

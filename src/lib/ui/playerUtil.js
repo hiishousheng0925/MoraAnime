@@ -14,3 +14,18 @@ export const fmt = (s) => {
   s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
   return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + `:${String(x).padStart(2, '0')}`;
 };
+
+/**
+ * 全屏开关：上一次切换没完成就不接新的。连续双击放大缩小几次，客户端整个卡死（2026-10-23 主人报）——
+ * 全屏切换是异步的（Electron 里还要改整个窗口），等它的 Promise 落定再冷却 300ms 才放行下一次
+ * @param {() => Element | null | undefined} target  要全屏的元素
+ */
+export function fullscreenToggle(target) {
+  let busy = false;
+  return () => {
+    if (busy) return;
+    busy = true;
+    Promise.resolve(document.fullscreenElement ? document.exitFullscreen() : target()?.requestFullscreen?.())
+      .catch(() => {}).finally(() => setTimeout(() => { busy = false; }, 300));
+  };
+}

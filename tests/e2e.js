@@ -290,7 +290,7 @@ console.log('\n━━━ 5a2. 标「看完」应自动补满集数（曾显示 0
   const { setEntry, setTriage } = await import('../src/lib/server/queries.js');
   db.exec('DELETE FROM user_entry; DELETE FROM triage; DELETE FROM watch_log;');
   const a = db.prepare(`SELECT id, episodes FROM anime WHERE is_stub=0 AND episodes BETWEEN 12 AND 30
-    ORDER BY bgm_collection DESC LIMIT 1`).get();
+    AND coalesce(status_eff, status) = 'FINISHED' ORDER BY bgm_collection DESC LIMIT 1`).get();
   const ep = () => db.prepare('SELECT current_episode c, is_vague v FROM user_entry WHERE anime_id=?').get(a.id);
 
   setEntry(a.id, { status: 'completed' });
@@ -323,6 +323,20 @@ console.log('\n━━━ 5a2. 标「看完」应自动补满集数（曾显示 0
   ok(backfillCompletedEpisodes() === 1, '回填补上历史的空集数');
   ok(ep().c === a.episodes, '回填后集数是满的', `${ep().c}/${a.episodes}`);
   ok(backfillCompletedEpisodes() === 0, '再跑一次回填是空操作');
+  db.exec('DELETE FROM user_entry; DELETE FROM triage; DELETE FROM watch_log;');
+
+  // 还没播完的番：「看完」补到已播集数（2026-10-23 主人报：恶女不才 Bangumi 只播了 11 集、另一个数据源写 12，被补成 12）
+  const { airedCount } = await import('../src/lib/server/episodes.js');
+  const on = db.prepare(`SELECT id, episodes FROM anime WHERE is_stub=0 AND episodes > 1 AND bgm_id IS NOT NULL
+      AND coalesce(status_eff, status) = 'ONGOING' ORDER BY bgm_collection DESC LIMIT 40`).all()
+    .map((x) => ({ ...x, ac: airedCount(x.id) })).find((x) => x.ac && x.ac.aired > 0);
+  if (on) {
+    const cur = () => db.prepare('SELECT current_episode c FROM user_entry WHERE anime_id=?').get(on.id)?.c;
+    setEntry(on.id, { status: 'completed' });
+    ok(cur() === on.ac.aired, '还没播完的番标「看完」→ 补到已播集数，不是总集数', `${cur()}（已播 ${on.ac.aired} / 共 ${on.episodes}）`);
+    setEntry(on.id, { status: 'watching' });
+    ok(cur() === null, '改回「在看」→ 补的已播集数也退回未填', String(cur()));
+  } else console.log('  ⏭️  库里没有连载中且有分集数据的番，跳过');
   db.exec('DELETE FROM user_entry; DELETE FROM triage; DELETE FROM watch_log;');
 }
 

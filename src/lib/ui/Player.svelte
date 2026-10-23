@@ -30,7 +30,7 @@
   import { untrack } from 'svelte';
   import { media } from '$lib/media.svelte.js';
   import { srSupported, startSuperRes } from './superres.js';
-  import { store, fmt } from './playerUtil.js';
+  import { store, fmt, fullscreenToggle } from './playerUtil.js';
 
   /** srSrc：开超分时换用的同源地址（直连 mp4 跨站读不了画面）；不给就用 src */
   /**
@@ -105,7 +105,7 @@
   }
   const toggle = () => { if (!video) return; video.paused ? video.play().catch(() => {}) : video.pause(); poke(); };
   const seek = (t) => { if (video && dur) { video.currentTime = Math.max(0, Math.min(dur - 0.5, t)); poke(); } };
-  const toggleFull = () => (document.fullscreenElement ? document.exitFullscreen() : box?.requestFullscreen?.())?.catch?.(() => {});
+  const toggleFull = fullscreenToggle(() => box);   // 带防连点，见 playerUtil.js
   const pip = () => (document.pictureInPictureElement ? document.exitPictureInPicture() : video?.requestPictureInPicture?.())?.catch?.(() => {});
   const openMenu = (m) => { menu = menu === m ? null : m; poke(); };
 
@@ -168,8 +168,10 @@
     c.width = Math.round(tw); c.height = Math.round(tw / ar);
     // 启动失败、播放中途出错（某一帧异常 / 显卡设备丢失）都记进 srErr：srOn 随之为假，<video> 露出来接着放原画
     let stop = null, dead = false, fail = (e) => { if (!dead) { console.warn('[超分] 出错', e); srErr = String(e?.message ?? e); } };
-    startSuperRes(v, c, mode, fail).then((s) => { if (dead) s(); else stop = s; }).catch(fail);
-    return () => { dead = true; stop?.(); };
+    // 尺寸稳定 250ms 再建：全屏切换动画里 boxW/boxH 一帧一变，原来每变一次就新建一套 WebGPU 设备 + 管线，
+    // 连续双击切全屏会同时堆一大串，显卡忙不过来 → 超分报错退回原画、严重时整个窗口卡死（2026-10-23 主人报）
+    const t = setTimeout(() => startSuperRes(v, c, mode, fail).then((s) => { if (dead) s(); else stop = s; }).catch(fail), 250);
+    return () => { dead = true; clearTimeout(t); stop?.(); };
   });
 
   /**
